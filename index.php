@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Newsroom Article Creator</title>
+    <title>Newsroom Creator</title>
     <script src="https://unpkg.com/feather-icons"></script>
     <style>
         :root {
@@ -82,6 +82,7 @@
         button:hover { opacity: 0.9; }
         button.secondary { background: var(--surface-color); color: var(--text-color); border: 1px solid var(--border-color); }
         button.danger { background: var(--danger-color); }
+        button.success { background: #10b981; color: white; }
         button.icon-btn { padding: 6px; background: transparent; color: var(--text-color); border: 1px solid transparent;}
         button.icon-btn:hover { border-color: var(--border-color); background: var(--bg-color); }
         
@@ -173,7 +174,7 @@
         <nav>
             <div class="nav-inner">
                 <div class="nav-brand">
-                    <i data-feather="edit-3"></i> Newsroom
+                    <i data-feather="edit-3"></i> Newsroom Creator
                 </div>
                 <div class="nav-links">
                     <button onclick="switchView('dashboard')"><i data-feather="home"></i> <span>Dashboard</span></button>
@@ -243,6 +244,7 @@
 
                         <div style="margin-top:20px; display:flex; gap:10px; flex-wrap:wrap;">
                             <button onclick="saveArticle()"><i data-feather="save"></i> Save</button>
+                            <button onclick="pushToWordPress()" class="success" id="btn-wp-push"><i data-feather="upload-cloud"></i> Push to WordPress</button>
                             <button onclick="copyToClipboard('article')" class="secondary"><i data-feather="copy"></i> Copy Article</button>
                             <button onclick="copyToClipboard('social')" class="secondary"><i data-feather="copy"></i> Copy Socials</button>
                             <button onclick="trashCurrentArticle()" class="danger"><i data-feather="trash"></i> Delete</button>
@@ -288,7 +290,7 @@
                     </div>
                     <label style="font-size:0.85rem; font-weight:600;">Model Name</label>
                     <input type="text" id="ai-model" placeholder="e.g. gpt-4o-mini">
-                    <div style="margin-top:5px; padding: 10px 14px; background:var(--bg-color); border:1px solid var(--border-color); border-radius:6px; font-size:0.8rem; color:var(--text-muted);">
+                    <div style="margin-top:5px; padding: 10px 14px; background:var(--bg-color); border:1px solid var(--border-color); border-radius6px; font-size:0.8rem; color:var(--text-muted);">
                         <strong>Examples:</strong> OpenAI: <code>https://api.openai.com/v1</code> &nbsp;|&nbsp; OpenRouter: <code>https://openrouter.ai/api/v1</code> &nbsp;|&nbsp; Any OpenAI-compatible endpoint is supported.
                     </div>
                     <div style="margin-top:15px;">
@@ -296,6 +298,24 @@
                         <button onclick="testAiSettings()" class="secondary" style="margin-left:10px;" id="btn-test-ai"><i data-feather="zap"></i> Test Connection</button>
                     </div>
                     <p id="ai-test-result" style="font-size:0.85rem; margin-top:10px;"></p>
+                </div>
+
+                <div class="card admin-only">
+                    <h2>WordPress Integration (Admin)</h2>
+                    <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:15px;">Connect to your WordPress site so generated articles can be pushed as draft posts for review.</p>
+                    <label style="font-size:0.85rem; font-weight:600;">WordPress Site URL</label>
+                    <input type="text" id="wp-site-url" placeholder="e.g. https://yoursite.com">
+                    <label style="font-size:0.85rem; font-weight:600;">API Key</label>
+                    <div style="position:relative;">
+                        <input type="password" id="wp-api-key" placeholder="Enter the key from the Newsroom Creator plugin" style="padding-right:44px;">
+                        <button onclick="toggleWpKeyVisibility()" class="icon-btn" id="btn-toggle-wp-key" title="Show/hide API key" style="position:absolute; right:8px; top:50%; transform:translateY(-60%); margin:0;"><i data-feather="eye"></i></button>
+                    </div>
+                    <div style="margin-top:5px; padding: 10px 14px; background:var(--bg-color); border:1px solid var(--border-color); border-radius:6px; font-size:0.8rem; color:var(--text-muted);">
+                        Install the <strong>Newsroom Creator</strong> plugin on your WordPress site, then copy the API key it generates into the field above.
+                    </div>
+                    <div style="margin-top:15px;">
+                        <button onclick="saveWpSettings()"><i data-feather="save"></i> Save WordPress Settings</button>
+                    </div>
                 </div>
 
                 <div class="card admin-only">
@@ -708,6 +728,70 @@
             document.getElementById('ai-base-url').value = res.ai_base_url || '';
             document.getElementById('ai-api-key').value  = res.ai_api_key  || '';
             document.getElementById('ai-model').value    = res.ai_model    || '';
+            document.getElementById('wp-site-url').value = res.wp_site_url || '';
+            document.getElementById('wp-api-key').value  = res.wp_api_key  || '';
+        }
+
+        async function saveWpSettings() {
+            const data = {
+                wp_site_url: document.getElementById('wp-site-url').value.trim(),
+                wp_api_key:  document.getElementById('wp-api-key').value.trim(),
+            };
+            if (!data.wp_site_url || !data.wp_api_key) {
+                return showToast('Please fill in the WordPress URL and API key.', true);
+            }
+            const res = await api('save_settings', 'POST', data);
+            if (res && res.success) showToast('WordPress settings saved successfully!');
+            else showToast('Failed to save WordPress settings.', true);
+        }
+
+        function toggleWpKeyVisibility() {
+            const input = document.getElementById('wp-api-key');
+            const btn   = document.getElementById('btn-toggle-wp-key');
+            if (input.type === 'password') {
+                input.type = 'text';
+                btn.innerHTML = '<i data-feather="eye-off"></i>';
+            } else {
+                input.type = 'password';
+                btn.innerHTML = '<i data-feather="eye"></i>';
+            }
+            feather.replace();
+        }
+
+        async function pushToWordPress() {
+            const headline = document.getElementById('edit-headline').value.trim();
+            const content  = document.getElementById('edit-content').value.trim();
+
+            if (!headline || !content) {
+                return showToast('Please generate or enter an article before pushing to WordPress.', true);
+            }
+
+            const btn = document.getElementById('btn-wp-push');
+            btn.innerHTML = 'Pushing...';
+            btn.disabled  = true;
+
+            const res = await api('push_to_wordpress', 'POST', { headline, article_content: content });
+
+            btn.innerHTML = '<i data-feather="upload-cloud"></i> Push to WordPress';
+            btn.disabled  = false;
+            feather.replace();
+
+            if (res && res.success) {
+                let msg = 'Draft created in WordPress!';
+                if (res.edit_url) {
+                    msg += ' <a href="' + res.edit_url + '" target="_blank" style="color:inherit;text-decoration:underline;">Edit post →</a>';
+                }
+                const container = document.getElementById('toast-container');
+                const toast = document.createElement('div');
+                toast.className = 'toast success';
+                toast.innerHTML = '<i data-feather="check-circle" style="color:#10b981"></i> <span>' + msg + '</span>';
+                container.appendChild(toast);
+                feather.replace();
+                setTimeout(() => toast.classList.add('show'), 10);
+                setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 6000);
+            } else {
+                showToast('WordPress push failed: ' + (res?.error || 'Unknown error'), true);
+            }
         }
 
         async function saveAiSettings() {
