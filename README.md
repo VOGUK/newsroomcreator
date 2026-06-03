@@ -42,4 +42,3 @@ This application is designed for rapid deployment on standard PHP-based shared h
 * **Backup**: Regularly use the "Backup JSON" feature to maintain local copies of your articles.
 * **API Security**: Your API keys are stored in the local SQLite database and are not accessible via the frontend code.
 OpenRouter API keys. It is best to upload the template version with the keys removed, or add `api.php` to your `.gitignore` file.
-* **Logo/Icon:** Since you wanted a professional icon, I recommend searching for a free SVG icon (like "newspaper" or "edit" from [Lucide Icons](https://lucide.dev/)) and placing it as `logo.svg` in your project folder to add that final professional touch.
