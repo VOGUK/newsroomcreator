@@ -82,7 +82,6 @@
         button:hover { opacity: 0.9; }
         button.secondary { background: var(--surface-color); color: var(--text-color); border: 1px solid var(--border-color); }
         button.danger { background: var(--danger-color); }
-        button.success { background: #10b981; color: white; }
         button.icon-btn { padding: 6px; background: transparent; color: var(--text-color); border: 1px solid transparent;}
         button.icon-btn:hover { border-color: var(--border-color); background: var(--bg-color); }
         
@@ -220,34 +219,43 @@
                     </div>
 
                     <div class="card">
+                        <div id="editor-wp-badge" class="hidden" style="background:#10b981; color:white; padding:8px 12px; border-radius:6px; font-size:0.85rem; font-weight:bold; margin-bottom:15px; text-align:center;"></div>
                         <h3>Generated Article</h3>
                         <input type="text" id="edit-headline" placeholder="Headline...">
-                        <textarea id="edit-content"></textarea>
+                        <textarea id="edit-content" style="margin-bottom: 5px;"></textarea>
                         
-                        <div style="margin-top:15px; border-top: 1px solid var(--border-color); padding-top:15px;">
-                            <button onclick="suggestImage()" class="secondary"><i data-feather="image"></i> Suggest Image</button>
-                            <p id="edit-image-sug" class="text-muted" style="font-size:0.9rem; margin:10px 0;"></p>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <div id="article-stats" class="text-muted" style="font-size:0.85rem;">0 words | 0 chars | ~0 min read (out loud)</div>
+                            <button onclick="checkSpelling()" id="btn-spellcheck" style="background-color: #f97316; color: white; border: none;">
+                                <i data-feather="check-square"></i> Check Spelling
+                            </button>
                         </div>
+
+                        <div style="margin-top:15px; border-top: 1px solid var(--border-color); padding-top:15px; display:flex; gap:10px; flex-wrap:wrap;">
+                            <button onclick="suggestImage()" class="secondary"><i data-feather="image"></i> Suggest Image</button>
+                        </div>
+                        <p id="edit-image-sug" class="text-muted" style="font-size:0.9rem; margin:10px 0;"></p>
+                        <div id="spellcheck-results" class="hidden" style="margin-top:10px; font-size:0.9rem;"></div>
                         
                         <div style="margin-top:15px; border-top: 1px solid var(--border-color); padding-top:15px;">
                             <button onclick="generateSocial()" class="secondary"><i data-feather="share-2"></i> Create Social Content</button>
                             <textarea id="edit-social1" style="min-height:60px; margin-top:10px;" placeholder="Post 1 (< 100 chars)"></textarea>
                             <textarea id="edit-social2" style="min-height:80px;" placeholder="Post 2 (< 300 chars)"></textarea>
+                            
                             <div style="margin-top:10px;">
-                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                                    <label style="font-size:0.85rem; font-weight:600; color:var(--text-muted);">Hashtags</label>
-                                    <button onclick="copyHashtags()" class="secondary" style="padding:4px 10px; font-size:0.8rem;"><i data-feather="hash"></i> Copy Hashtags</button>
-                                </div>
                                 <textarea id="edit-hashtags" style="min-height:80px; font-size:0.85rem;" placeholder="Hashtags will appear here after generating social content..."></textarea>
                             </div>
                         </div>
 
                         <div style="margin-top:20px; display:flex; gap:10px; flex-wrap:wrap;">
                             <button onclick="saveArticle()"><i data-feather="save"></i> Save</button>
-                            <button onclick="pushToWordPress()" class="success" id="btn-wp-push"><i data-feather="upload-cloud"></i> Push to WordPress</button>
+                            <button onclick="pushToWordPress()" id="btn-wp-push" style="background-color: #10b981; color: white; border: none;"><i data-feather="upload-cloud"></i> Push to WordPress</button>
+                            <button onclick="trashCurrentArticle()" class="danger"><i data-feather="trash"></i> Delete</button>
+                        </div>
+                        <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
                             <button onclick="copyToClipboard('article')" class="secondary"><i data-feather="copy"></i> Copy Article</button>
                             <button onclick="copyToClipboard('social')" class="secondary"><i data-feather="copy"></i> Copy Socials</button>
-                            <button onclick="trashCurrentArticle()" class="danger"><i data-feather="trash"></i> Delete</button>
+                            <button onclick="copyHashtags()" class="secondary"><i data-feather="hash"></i> Copy Hashtags</button>
                         </div>
                     </div>
                 </div>
@@ -290,7 +298,14 @@
                     </div>
                     <label style="font-size:0.85rem; font-weight:600;">Model Name</label>
                     <input type="text" id="ai-model" placeholder="e.g. gpt-4o-mini">
-                    <div style="margin-top:5px; padding: 10px 14px; background:var(--bg-color); border:1px solid var(--border-color); border-radius6px; font-size:0.8rem; color:var(--text-muted);">
+                    
+                    <label style="font-size:0.85rem; font-weight:600;">Language Variant (AI & Spell Checker)</label>
+                    <select id="language-variant">
+                        <option value="British">British English</option>
+                        <option value="American">American English</option>
+                    </select>
+
+                    <div style="margin-top:5px; padding: 10px 14px; background:var(--bg-color); border:1px solid var(--border-color); border-radius:6px; font-size:0.8rem; color:var(--text-muted);">
                         <strong>Examples:</strong> OpenAI: <code>https://api.openai.com/v1</code> &nbsp;|&nbsp; OpenRouter: <code>https://openrouter.ai/api/v1</code> &nbsp;|&nbsp; Any OpenAI-compatible endpoint is supported.
                     </div>
                     <div style="margin-top:15px;">
@@ -315,7 +330,9 @@
                     </div>
                     <div style="margin-top:15px;">
                         <button onclick="saveWpSettings()"><i data-feather="save"></i> Save WordPress Settings</button>
+                        <button onclick="testWpSettings()" class="secondary" style="margin-left:10px;" id="btn-test-wp"><i data-feather="zap"></i> Test Connection</button>
                     </div>
+                    <p id="wp-test-result" style="font-size:0.85rem; margin-top:10px;"></p>
                 </div>
 
                 <div class="card admin-only">
@@ -372,11 +389,33 @@
         let currentUserId = null;
         let currentUserRole = null;
         let currentArticleId = 0;
+        let currentWpPostId = null; // Tracks existing WordPress post ID for overwriting
         let textSize = 16;
         let allArticlesData = [];
 
+        // Helper to format timestamps nicely
+        function formatDateTimeStr(dateTimeStr) {
+            if (!dateTimeStr) return "";
+            try {
+                const d = new Date(dateTimeStr.replace(/-/g, "/"));
+                if (!isNaN(d.getTime())) {
+                    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) + 
+                           ' at ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                }
+            } catch(e) {}
+            return dateTimeStr;
+        }
+
+        // --- Stats Tracking Logic ---
+        function updateStats() {
+            const text = document.getElementById('edit-content').value || '';
+            const charCount = text.length;
+            const wordCount = text.trim() === '' ? 0 : text.trim().split(/\s+/).length;
+            const readTimeMin = Math.ceil(wordCount / 150); // Typical reading out loud speed ~150 wpm
+            document.getElementById('article-stats').innerText = `${wordCount} words | ${charCount} chars | ~${readTimeMin} min read (out loud)`;
+        }
+
         // --- Custom GUI Popups (Toasts & Modals) ---
-        
         function showToast(message, isError = false) {
             const container = document.getElementById('toast-container');
             const toast = document.createElement('div');
@@ -442,7 +481,7 @@
             if (localStorage.getItem('theme') === 'dark') toggleTheme();
         });
 
-        // --- Upgraded API call with robust error handling ---
+        // --- API Calls ---
         async function api(action, method = 'GET', data = null) {
             try {
                 const options = { method };
@@ -451,10 +490,10 @@
                     options.body = JSON.stringify(data);
                 }
                 const res = await fetch(`api.php?action=${action}`, options);
-                const text = await res.text(); // Grab raw text first to catch PHP errors
+                const text = await res.text(); 
                 
                 try {
-                    return JSON.parse(text); // Try to convert to JSON
+                    return JSON.parse(text); 
                 } catch (err) {
                     console.error("Server returned an error instead of JSON:", text);
                     return { success: false, error: "Check console. Server error: " + text.substring(0, 100) };
@@ -554,9 +593,13 @@
             const container = document.getElementById(containerId);
             container.innerHTML = articles.length === 0 ? '<p class="text-muted">No articles found.</p>' : '';
             articles.forEach(art => {
+                let wpLabel = '';
+                if (art.wp_pushed_at) {
+                    wpLabel = `<span style="background:#10b981; color:white; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:600; margin-left:10px; display:inline-block;">Article pushed on ${formatDateTimeStr(art.wp_pushed_at)}</span>`;
+                }
                 container.innerHTML += `
                     <div class="list-item">
-                        <div><strong>${art.headline || 'Untitled'}</strong> <br><small>${art.updated_at}</small></div>
+                        <div><strong>${art.headline || 'Untitled'}</strong> ${wpLabel} <br><small>${art.updated_at}</small></div>
                         <div class="list-item-actions">
                             <button onclick="editArticle(${art.id})" class="secondary icon-btn" title="View/Edit"><i data-feather="edit"></i></button>
                             <button onclick="trashArticle(${art.id})" class="danger icon-btn" title="Trash"><i data-feather="trash-2"></i></button>
@@ -568,6 +611,7 @@
 
         function createNewArticle() {
             currentArticleId = 0;
+            currentWpPostId = null;
             document.getElementById('edit-original').value = '';
             document.getElementById('edit-headline').value = '';
             document.getElementById('edit-content').value = '';
@@ -575,6 +619,12 @@
             document.getElementById('edit-social2').value = '';
             document.getElementById('edit-hashtags').value = '';
             document.getElementById('edit-image-sug').innerText = '';
+            document.getElementById('editor-wp-badge').classList.add('hidden');
+            document.getElementById('btn-wp-push').innerHTML = '<i data-feather="upload-cloud"></i> Push to WordPress';
+            document.getElementById('spellcheck-results').classList.add('hidden');
+            document.getElementById('spellcheck-results').innerHTML = '';
+            updateStats();
+            feather.replace();
             switchView('editor');
         }
 
@@ -583,18 +633,39 @@
             const art = res.articles.find(a => a.id == id);
             if (art) {
                 currentArticleId = art.id;
+                currentWpPostId = art.wp_post_id || null;
+                
                 document.getElementById('edit-original').value = art.original_content || '';
                 document.getElementById('edit-headline').value = art.headline || '';
                 document.getElementById('edit-content').value = art.article_content || '';
                 document.getElementById('edit-social1').value = art.social_1 || '';
                 document.getElementById('edit-social2').value = art.social_2 || '';
-                document.getElementById('edit-hashtags').value = '';
+                document.getElementById('edit-hashtags').value = art.hashtags || '';
                 document.getElementById('edit-image-sug').innerText = art.image_suggestion ? `Suggestion: ${art.image_suggestion}` : '';
+                
+                const wpBadge = document.getElementById('editor-wp-badge');
+                const wpBtn = document.getElementById('btn-wp-push');
+                
+                if (art.wp_pushed_at) {
+                    wpBadge.innerText = `Article pushed on ${formatDateTimeStr(art.wp_pushed_at)}`;
+                    wpBadge.classList.remove('hidden');
+                    wpBtn.innerHTML = '<i data-feather="refresh-cw"></i> Update WP Draft';
+                } else {
+                    wpBadge.classList.add('hidden');
+                    wpBtn.innerHTML = '<i data-feather="upload-cloud"></i> Push to WordPress';
+                }
+
+                document.getElementById('spellcheck-results').classList.add('hidden');
+                document.getElementById('spellcheck-results').innerHTML = '';
+
+                updateStats();
+                feather.replace();
                 switchView('editor');
             }
         }
 
         async function saveArticle() {
+            updateStats();
             const data = {
                 id: currentArticleId,
                 original_content: document.getElementById('edit-original').value,
@@ -602,6 +673,7 @@
                 article_content: document.getElementById('edit-content').value,
                 social_1: document.getElementById('edit-social1').value,
                 social_2: document.getElementById('edit-social2').value,
+                hashtags: document.getElementById('edit-hashtags').value,
                 image_suggestion: document.getElementById('edit-image-sug').innerText.replace('Suggestion: ', '')
             };
             const res = await api('save_article', 'POST', data);
@@ -667,6 +739,75 @@
             }
         }
 
+        async function checkSpelling() {
+            const content = document.getElementById('edit-content').value;
+            if(!content) return showToast("Please write or generate article content first.", true);
+
+            const btn = document.getElementById('btn-spellcheck');
+            const resDiv = document.getElementById('spellcheck-results');
+            
+            btn.innerHTML = 'Checking...';
+            btn.disabled = true;
+
+            const res = await api('check_spelling', 'POST', { article_content: content });
+            
+            btn.innerHTML = '<i data-feather="check-square"></i> Check Spelling';
+            btn.disabled = false;
+            feather.replace();
+
+            if (res && res.success) {
+                resDiv.innerHTML = '';
+                if (!res.errors || res.errors.length === 0) {
+                    resDiv.className = 'card';
+                    resDiv.style.borderColor = '#10b981';
+                    resDiv.style.background = 'rgba(16, 185, 129, 0.05)';
+                    resDiv.innerHTML = '<p style="color:#10b981; margin:0; font-weight:600;"><i data-feather="check-circle" style="vertical-align:middle; width:16px; height:16px; margin-right:5px;"></i> Perfect! No spelling errors detected.</p>';
+                } else {
+                    resDiv.className = 'card';
+                    resDiv.style.borderColor = 'var(--danger-color)';
+                    resDiv.style.background = 'rgba(220, 38, 38, 0.05)';
+                    let html = '<p style="color:var(--danger-color); margin:0 0 10px 0; font-weight:600;"><i data-feather="alert-circle" style="vertical-align:middle; width:16px; height:16px; margin-right:5px;"></i> Flagged Words / Spelling Variants Needed:</p><ul style="margin:0; padding-left:20px; line-height:1.5;">';
+                    res.errors.forEach(err => {
+                        const wordEscaped = err.word.replace(/'/g, "\\'");
+                        const sugEscaped = err.suggestion.replace(/'/g, "\\'");
+                        html += `<li>Found <strong>"${err.word}"</strong>. Suggestion: <span style="color:#10b981; font-weight:bold;">${err.suggestion}</span> 
+                        <button onclick="replaceWord(this, '${wordEscaped}', '${sugEscaped}')" style="background-color:var(--danger-color); color:white; border:none; padding:3px 8px; border-radius:4px; font-size:0.75rem; cursor:pointer; margin-left:10px;">Apply</button>
+                        <br><small class="text-muted">Context: ...${err.context}...</small></li>`;
+                    });
+                    html += '</ul>';
+                    resDiv.innerHTML = html;
+                }
+                resDiv.classList.remove('hidden');
+                feather.replace();
+            } else {
+                showToast("Failed to perform spellcheck: " + (res.error || "Unknown error"), true);
+            }
+        }
+
+        // Apply replacement word function
+        function replaceWord(btn, word, suggestion) {
+            const textarea = document.getElementById('edit-content');
+            try {
+                // Try word boundaries first to avoid partial word replacements
+                const regex = new RegExp(`\\b${word}\\b`);
+                if (regex.test(textarea.value)) {
+                    textarea.value = textarea.value.replace(regex, suggestion);
+                } else {
+                    // Fallback to basic string replace
+                    textarea.value = textarea.value.replace(word, suggestion);
+                }
+            } catch(e) {
+                textarea.value = textarea.value.replace(word, suggestion);
+            }
+            
+            // Visual feedback on the button
+            btn.style.backgroundColor = '#10b981';
+            btn.innerText = 'Applied';
+            btn.disabled = true;
+
+            showToast(`Replaced "${word}" with "${suggestion}"`);
+        }
+
         function copyHashtags() {
             const text = document.getElementById('edit-hashtags').value;
             if (!text) return showToast("No hashtags to copy.", true);
@@ -728,6 +869,7 @@
             document.getElementById('ai-base-url').value = res.ai_base_url || '';
             document.getElementById('ai-api-key').value  = res.ai_api_key  || '';
             document.getElementById('ai-model').value    = res.ai_model    || '';
+            document.getElementById('language-variant').value = res.language_variant || 'British';
             document.getElementById('wp-site-url').value = res.wp_site_url || '';
             document.getElementById('wp-api-key').value  = res.wp_api_key  || '';
         }
@@ -743,6 +885,28 @@
             const res = await api('save_settings', 'POST', data);
             if (res && res.success) showToast('WordPress settings saved successfully!');
             else showToast('Failed to save WordPress settings.', true);
+        }
+
+        async function testWpSettings() {
+            const btn = document.getElementById('btn-test-wp');
+            const result = document.getElementById('wp-test-result');
+            btn.innerHTML = 'Testing...'; btn.disabled = true;
+            result.style.color = 'var(--text-muted)';
+            result.innerText = 'Connecting to WordPress...';
+            // Save current values first so the test uses whatever is in the fields
+            await api('save_settings', 'POST', {
+                wp_site_url: document.getElementById('wp-site-url').value.trim(),
+                wp_api_key:  document.getElementById('wp-api-key').value.trim(),
+            });
+            const res = await api('test_wp_connection');
+            btn.innerHTML = '<i data-feather="zap"></i> Test Connection'; btn.disabled = false; feather.replace();
+            if (res && res.success) {
+                result.style.color = '#10b981';
+                result.innerText = '✓ Connection successful! WordPress site is reachable and the API key is valid.';
+            } else {
+                result.style.color = 'var(--danger-color)';
+                result.innerText = '✗ ' + (res?.error || 'Connection failed. Check your site URL and API key.');
+            }
         }
 
         function toggleWpKeyVisibility() {
@@ -766,18 +930,55 @@
                 return showToast('Please generate or enter an article before pushing to WordPress.', true);
             }
 
+            if (currentArticleId === 0) {
+                const data = {
+                    id: 0,
+                    original_content: document.getElementById('edit-original').value,
+                    headline: headline,
+                    article_content: content,
+                    social_1: document.getElementById('edit-social1').value,
+                    social_2: document.getElementById('edit-social2').value,
+                    hashtags: document.getElementById('edit-hashtags').value,
+                    image_suggestion: document.getElementById('edit-image-sug').innerText.replace('Suggestion: ', '')
+                };
+                const autoSave = await api('save_article', 'POST', data);
+                if (autoSave && autoSave.success) {
+                    currentArticleId = autoSave.id;
+                } else {
+                    return showToast('Failed to save article locally before pushing to WordPress.', true);
+                }
+            }
+
             const btn = document.getElementById('btn-wp-push');
-            btn.innerHTML = 'Pushing...';
+            const isUpdate = currentWpPostId !== null;
+            
+            btn.innerHTML = isUpdate ? 'Updating...' : 'Pushing...';
             btn.disabled  = true;
 
-            const res = await api('push_to_wordpress', 'POST', { headline, article_content: content });
+            const res = await api('push_to_wordpress', 'POST', { 
+                id: currentArticleId, 
+                headline, 
+                article_content: content,
+                wp_post_id: currentWpPostId // Pass to backend so it can overwrite
+            });
 
-            btn.innerHTML = '<i data-feather="upload-cloud"></i> Push to WordPress';
+            btn.innerHTML = isUpdate ? '<i data-feather="refresh-cw"></i> Update WP Draft' : '<i data-feather="upload-cloud"></i> Push to WordPress';
             btn.disabled  = false;
             feather.replace();
 
             if (res && res.success) {
-                let msg = 'Draft created in WordPress!';
+                if (res.post_id) currentWpPostId = res.post_id;
+                
+                if (res.wp_pushed_at) {
+                    const wpBadge = document.getElementById('editor-wp-badge');
+                    wpBadge.innerText = `Article pushed on ${formatDateTimeStr(res.wp_pushed_at)}`;
+                    wpBadge.classList.remove('hidden');
+                }
+                
+                btn.innerHTML = '<i data-feather="refresh-cw"></i> Update WP Draft';
+                feather.replace();
+                
+                let msg = isUpdate ? 'Draft updated in WordPress!' : 'Draft created in WordPress!';
                 if (res.edit_url) {
                     msg += ' <a href="' + res.edit_url + '" target="_blank" style="color:inherit;text-decoration:underline;">Edit post →</a>';
                 }
@@ -799,12 +1000,13 @@
                 ai_base_url: document.getElementById('ai-base-url').value.trim(),
                 ai_api_key:  document.getElementById('ai-api-key').value.trim(),
                 ai_model:    document.getElementById('ai-model').value.trim(),
+                language_variant: document.getElementById('language-variant').value
             };
             if (!data.ai_base_url || !data.ai_api_key || !data.ai_model) {
                 return showToast('Please fill in all AI provider fields.', true);
             }
             const res = await api('save_settings', 'POST', data);
-            if (res && res.success) showToast('AI settings saved successfully!');
+            if (res && res.success) showToast('AI & Language settings saved successfully!');
             else showToast('Failed to save settings.', true);
         }
 
@@ -819,6 +1021,7 @@
                 ai_base_url: document.getElementById('ai-base-url').value.trim(),
                 ai_api_key:  document.getElementById('ai-api-key').value.trim(),
                 ai_model:    document.getElementById('ai-model').value.trim(),
+                language_variant: document.getElementById('language-variant').value
             });
             const res = await api('suggest_image', 'POST', { article_content: 'A quick brown fox jumps over the lazy dog.' });
             btn.innerHTML = '<i data-feather="zap"></i> Test Connection'; btn.disabled = false; feather.replace();
