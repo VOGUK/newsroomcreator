@@ -1,4 +1,10 @@
-**Newsroom Article Creator** is a lightweight, self-hosted application designed for journalists and content creators. It transforms raw source material (press releases, emails, social media posts) into high-quality, SEO-optimized news articles and social media content using AI. Built for shared hosting environments with no complex dependencies, it features an SQLite-backed architecture, modern mobile-responsive UI, and flexible AI provider support. It is a sleek, self-hosted web application that streamlines the editorial workflow.
+# Newsroom Article Creator
+
+**Newsroom Article Creator** is a lightweight, self-hosted application designed for journalists and content creators. It is a sleek, self-hosted web application that streamlines the editorial workflow.
+
+It transforms raw source material (press releases, emails, social media posts) into high-quality, SEO-optimized news articles and social media content using AI. 
+
+Built for shared hosting environments with no complex dependencies, it features an SQLite-backed architecture, modern mobile-responsive UI, and flexible AI provider support. 
 
 ## Key Features
 
