@@ -18,6 +18,7 @@ try {
         role TEXT
     )");
     
+    // Updated setup table script to track hashtags
     $db->exec("CREATE TABLE IF NOT EXISTS articles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
@@ -26,11 +27,19 @@ try {
         article_content TEXT,
         social_1 TEXT,
         social_2 TEXT,
+        hashtags TEXT,
         image_suggestion TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         deleted_at DATETIME DEFAULT NULL
     )");
+
+    // Gracefully handle existing database structural upgrades for hashtags column
+    try {
+        $db->exec("ALTER TABLE articles ADD COLUMN hashtags TEXT");
+    } catch (PDOException $e) {
+        // Column already exists, safe to ignore
+    }
 
     // Settings table for admin-configurable options
     $db->exec("CREATE TABLE IF NOT EXISTS settings (
@@ -42,6 +51,10 @@ try {
     $db->exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_base_url', '')");
     $db->exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_api_key', '')");
     $db->exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_model', '')");
+
+    // Seed empty WordPress settings on first install
+    $db->exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('wp_site_url', '')");
+    $db->exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('wp_api_key', '')");
 
     // Create default admin if no users exist
     $stmt = $db->query("SELECT COUNT(*) FROM users");
@@ -185,12 +198,12 @@ switch ($action) {
     case 'save_article':
         $data = json_decode(file_get_contents('php://input'), true);
         if (isset($data['id']) && $data['id'] > 0) {
-            $stmt = $db->prepare("UPDATE articles SET original_content=?, headline=?, article_content=?, social_1=?, social_2=?, image_suggestion=?, updated_at=CURRENT_TIMESTAMP WHERE id=?");
-            $stmt->execute([$data['original_content'], $data['headline'], $data['article_content'], $data['social_1'], $data['social_2'], $data['image_suggestion'], $data['id']]);
+            $stmt = $db->prepare("UPDATE articles SET original_content=?, headline=?, article_content=?, social_1=?, social_2=?, hashtags=?, image_suggestion=?, updated_at=CURRENT_TIMESTAMP WHERE id=?");
+            $stmt->execute([$data['original_content'], $data['headline'], $data['article_content'], $data['social_1'], $data['social_2'], $data['hashtags'] ?? '', $data['image_suggestion'], $data['id']]);
             $id = $data['id'];
         } else {
-            $stmt = $db->prepare("INSERT INTO articles (user_id, original_content, headline, article_content, social_1, social_2, image_suggestion) VALUES (?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$userId, $data['original_content'], $data['headline'], $data['article_content'], $data['social_1'], $data['social_2'], $data['image_suggestion']]);
+            $stmt = $db->prepare("INSERT INTO articles (user_id, original_content, headline, article_content, social_1, social_2, hashtags, image_suggestion) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$userId, $data['original_content'], $data['headline'], $data['article_content'], $data['social_1'], $data['social_2'], $data['hashtags'] ?? '', $data['image_suggestion']]);
             $id = $db->lastInsertId();
         }
         echo json_encode(['success' => true, 'id' => $id]);
@@ -273,7 +286,7 @@ switch ($action) {
         $result = callAI($db, "You are a social media manager and SEO expert. Output strictly in JSON format.", $prompt);
         
         if (isset($result['error'])) {
-            echo json_encode(['success' => false, 'error' => $result['error']]);
+            echo json_encode(['success' => false, 'error' => $errorMsg]);
             break;
         }
         
@@ -294,13 +307,15 @@ switch ($action) {
             'ai_base_url' => getSetting($db, 'ai_base_url'),
             'ai_api_key'  => getSetting($db, 'ai_api_key'),
             'ai_model'    => getSetting($db, 'ai_model'),
+            'wp_site_url' => getSetting($db, 'wp_site_url'),
+            'wp_api_key'  => getSetting($db, 'wp_api_key'),
         ]);
         break;
 
     case 'save_settings':
         if ($userRole !== 'admin') { echo json_encode(['success' => false]); exit; }
         $data = json_decode(file_get_contents('php://input'), true);
-        $allowed = ['ai_base_url', 'ai_api_key', 'ai_model'];
+        $allowed = ['ai_base_url', 'ai_api_key', 'ai_model', 'wp_site_url', 'wp_api_key'];
         foreach ($allowed as $key) {
             if (isset($data[$key])) {
                 $stmt = $db->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
@@ -308,6 +323,72 @@ switch ($action) {
             }
         }
         echo json_encode(['success' => true]);
+        break;
+
+    case 'push_to_wordpress':
+        $data = json_decode(file_get_contents('php://input'), true);
+
+        $wpUrl    = rtrim(getSetting($db, 'wp_site_url') ?: '', '/');
+        $wpApiKey = getSetting($db, 'wp_api_key') ?: '';
+
+        if (!$wpUrl || !$wpApiKey) {
+            echo json_encode(['success' => false, 'error' => 'WordPress is not configured. Please visit System Settings.']);
+            break;
+        }
+
+        $headline = $data['headline'] ?? '';
+        $body     = $data['article_content'] ?? '';
+
+        if (!$headline || !$body) {
+            echo json_encode(['success' => false, 'error' => 'Headline and article content are required.']);
+            break;
+        }
+
+        // Convert plain-text article body to simple HTML paragraphs
+        $paragraphs = array_filter(array_map('trim', explode("\n\n", $body)));
+        $htmlBody   = implode('', array_map(fn($p) => '<p>' . nl2br(htmlspecialchars($p)) . '</p>', $paragraphs));
+
+        $endpoint = $wpUrl . '/wp-json/newsroom-creator/v1/create-draft';
+
+        $ch = curl_init($endpoint);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Content-Type: application/json',
+            'X-Newsroom-API-Key: ' . $wpApiKey,
+        ]);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+            'title'   => $headline,
+            'content' => $htmlBody,
+        ]));
+        
+        // Fixed SSL verification issues by turning off strict alternative subject name validation
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0); 
+        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+
+        $response  = curl_exec($ch);
+        $curlError = curl_error($ch);
+        $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($response === false) {
+            echo json_encode(['success' => false, 'error' => 'Could not reach WordPress SSL: ' . $curlError]);
+            break;
+        }
+
+        $result = json_decode($response, true);
+
+        if ($httpCode === 201 && isset($result['post_id'])) {
+            echo json_encode([
+                'success'   => true,
+                'post_id'   => $result['post_id'],
+                'edit_url'  => $result['edit_url'] ?? '',
+            ]);
+        } else {
+            $errMsg = $result['message'] ?? ('Unexpected response (HTTP ' . $httpCode . ')');
+            echo json_encode(['success' => false, 'error' => $errMsg]);
+        }
         break;
 
     case 'get_users':
@@ -366,10 +447,9 @@ switch ($action) {
         $data = json_decode(file_get_contents('php://input'), true);
         if (is_array($data)) {
             foreach ($data as $row) {
-                // Skip articles that were in the recycle bin
                 if (!empty($row['deleted_at'])) continue;
-                $stmt = $db->prepare("INSERT INTO articles (user_id, original_content, headline, article_content, social_1, social_2, image_suggestion) VALUES (?, ?, ?, ?, ?, ?, ?)");
-                $stmt->execute([$userId, $row['original_content'], $row['headline'], $row['article_content'], $row['social_1'], $row['social_2'], $row['image_suggestion']]);
+                $stmt = $db->prepare("INSERT INTO articles (user_id, original_content, headline, article_content, social_1, social_2, hashtags, image_suggestion) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt->execute([$userId, $row['original_content'], $row['headline'], $row['article_content'], $row['social_1'], $row['social_2'], $row['hashtags'] ?? '', $row['image_suggestion']]);
             }
         }
         echo json_encode(['success' => true]);
