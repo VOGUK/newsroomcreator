@@ -41,4 +41,3 @@ This application is designed for rapid deployment on standard PHP-based shared h
 * **Default Credentials**: Immediately change the default admin password via the System tab.
 * **Backup**: Regularly use the "Backup JSON" feature to maintain local copies of your articles.
 * **API Security**: Your API keys are stored in the local SQLite database and are not accessible via the frontend code.
-OpenRouter API keys. It is best to upload the template version with the keys removed, or add `api.php` to your `.gitignore` file.
