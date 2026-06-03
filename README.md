@@ -28,7 +28,7 @@ This application is designed for rapid deployment on standard PHP-based shared h
 
 
 5. **Configure AI**: Once logged in, navigate to the **System** tab to enter your AI Provider's Base URL, API Key, and Model name.
-6. **Install Wordpress Plugin**: Install the Wordpress plugin, then enter the Site URL and API key found on the Settings page for articles to be pushed easily to Wordpress. 
+6. **Install Wordpress Plugin**: [NewsroomCreator.zip] Install the Wordpress plugin, then enter the Site URL and API key found on the Settings page for articles to be pushed easily to Wordpress. 
 
 ## Technology Stack
 
