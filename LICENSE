@@ -1,38 +1,36 @@
-**Copyright (c) 2026 VBI**
+Copyright (c) 2026 VBI
 
-**Software:** Newsroom Creator and associated WordPress Plugin
+Software: Newsroom Creator and associated WordPress Plugin
 
 By downloading, installing, or using the Software, you agree to be bound by the terms and conditions of this License. If you do not agree to these terms, do not download, install, or use the Software.
 
-### 1. Grant of Use (Permitted Actions)
+1. Grant of Use (Permitted Actions)
 
 The Licensor hereby grants you a perpetual, worldwide, non-exclusive, no-charge, royalty-free license to use the Software. Under this Grant of Use, you are completely free to:
 
-* **Download and Install:** Obtain a copy of the Software and install it on your servers, personal devices, or client environments.
-* **Run and Execute:** Operate the Software for its intended purpose.
-* **Private and Commercial Use:** Use the Software for personal projects, internal business operations, or commercial deployments without paying usage fees or royalties.
-* **Distribute Unmodified Copies:** Share or distribute verbatim copies of the Software, provided that the source code remains completely unmodified and this License agreement is included intact.
+* Download and Install: Obtain a copy of the Software and install it on your servers, personal devices, or client environments.
+* Run and Execute: Operate the Software for its intended purpose.
+* Private and Commercial Use: Use the Software for personal projects, internal business operations, or commercial deployments without paying usage fees or royalties.
+* Distribute Unmodified Copies: Share or distribute verbatim copies of the Software, provided that the source code remains completely unmodified and this License agreement is included intact.
 
-### 2. Restriction on Derivation (Prohibited Actions)
+2. Restriction on Derivation (Prohibited Actions)
 
-While the source code is available for your inspection, this is **not** an Open Source Initiative (OSI) approved open-source license. All rights to modify the Software are strictly withheld by the Licensor.
+While the source code is available for your inspection, this is not an Open Source Initiative (OSI) approved open-source license. All rights to modify the Software are strictly withheld by the Licensor.
 
-Unless you have explicitly purchased a separate **Commercial Modification License** from the Licensor, you are strictly **prohibited** from:
+Unless you have explicitly purchased a separate Commercial Modification License from the Licensor, you are strictly prohibited from:
 
-* **Modifying:** Altering, adding to, or deleting any part of the Software’s source code, assets, or accompanying documentation.
-* **Forking:** Creating a separate development branch or repository based on the Software's source code.
-* **Adapting:** Translating the Software into other programming languages or adapting it to run on unsupported platforms through code alteration.
-* **Creating Derivative Works:** Building new software, plugins, or tools that incorporate, directly rely on modified versions of, or derive from the Software’s proprietary source code.
+* Modifying: Altering, adding to, or deleting any part of the Software’s source code, assets, or accompanying documentation.
+* Forking: Creating a separate development branch or repository based on the Software's source code.
+* Adapting: Translating the Software into other programming languages or adapting it to run on unsupported platforms through code alteration.
+* Creating Derivative Works: Building new software, plugins, or tools that incorporate, directly rely on modified versions of, or derive from the Software’s proprietary source code.
 
-> **Note regarding Commercial Modification Licenses:**
-> If you require the ability to modify, adapt, or create derivative works of this Software for your project or business, you must purchase a Commercial Modification License. Please contact the Licensor at info@vbionline.co.uk for pricing and terms.
+Note regarding Commercial Modification Licenses:
+If you require the ability to modify, adapt, or create derivative works of this Software for your project or business, you must purchase a Commercial Modification License. Please contact the Licensor at info@vbionline.co.uk for pricing and terms.
 
----
-
-### 3. Ownership and Intellectual Property
+3. Ownership and Intellectual Property
 
 All title, ownership rights, and intellectual property rights in and to the Software (including but not limited to any source code, images, text, and accompanying materials) remain the sole property of the Licensor. This License is not a sale of the Software or any copy thereof.
 
-### 4. Disclaimer of Warranty
+4. Disclaimer of Warranty
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
