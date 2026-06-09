@@ -45,6 +45,9 @@ try {
 
     $db->exec("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)");
     $db->exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('language_variant', 'British')");
+    $db->exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('shorturl_provider', 'tinyurl')");
+    $db->exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('shorturl_api_key', '')");
+    $db->exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('shortio_domain', '')");
     $newKeywords = 'Keyword 1, Keyword 2, Keyword 3, Keyword 4, Keyword 5, Keyword 6, Keyword 7, Keyword 8, Keyword 9, Keyword 10, local, community';
     $oldKeywords = 'Hillingdon, Uxbridge, Hayes, Ruislip, Northwood, Yiewsley, West Drayton, Harefield, council, borough, local, community';
     // Insert default if no row exists; if the old location-specific default is still set, replace it with the generic placeholder
@@ -116,57 +119,90 @@ function esc_html_shim($text) {
 }
 
 /**
- * Shorten a URL via is.gd using format=simple + file_get_contents with ignore_errors,
- * exactly as the official is.gd PHP example recommends.
- * Returns ['shorturl' => '...'] on success or ['error' => '...'] on failure.
+ * Shorten a URL using TinyURL or Short.io depending on configured provider.
+ * Falls back gracefully if the configured provider fails.
  */
-function shortenWithIsgd($longUrl) {
+function shortenUrl($db, $longUrl) {
     if (empty($longUrl)) return ['error' => 'No URL provided.'];
-
     $parsed = parse_url($longUrl);
     if (empty($parsed['scheme']) || empty($parsed['host'])) {
         return ['error' => 'Invalid URL — must start with http:// or https://'];
     }
 
-    $apiUrl = 'https://is.gd/create.php?format=simple&url=' . urlencode($longUrl);
+    $provider = getSetting($db, 'shorturl_provider') ?: 'tinyurl';
+    $apiKey   = getSetting($db, 'shorturl_api_key') ?: '';
 
-    // ignore_errors is essential — without it PHP will not return the response body
-    // when is.gd sends a 4xx error HTTP status code (per the official is.gd example).
-    $ctx = stream_context_create([
-        'http' => [
-            'ignore_errors'   => true,
-            'timeout'         => 10,
-            'user_agent'      => 'Newsroom-Creator/1.5',
-        ],
-        'ssl' => [
-            'verify_peer'      => false,
-            'verify_peer_name' => false,
-        ],
-    ]);
-
-    $response = @file_get_contents($apiUrl, false, $ctx);
-
-    if ($response === false || !isset($http_response_header)) {
-        error_log('Newsroom Creator — is.gd: failed to reach API for URL: ' . $longUrl);
-        return ['error' => 'Could not reach is.gd — check your server outbound internet access.'];
+    if ($provider === 'shortio') {
+        return shortenWithShortIo($longUrl, $apiKey);
     }
-
-    // Extract HTTP status code
-    $httpStatus = 200;
-    if (preg_match('{HTTP/\d+\.\d+\s+(\d+)}', $http_response_header[0], $m)) {
-        $httpStatus = intval($m[1]);
-    }
-
-    $body = trim($response);
-
-    if ($httpStatus === 200 && !empty($body) && strpos($body, 'Error:') !== 0) {
-        return ['shorturl' => $body];
-    }
-
-    $msg = !empty($body) ? $body : 'Unknown error (HTTP ' . $httpStatus . ')';
-    error_log('Newsroom Creator — is.gd error: ' . $msg . ' | URL: ' . $longUrl);
-    return ['error' => $msg];
+    return shortenWithTinyUrl($longUrl, $apiKey);
 }
+
+function shortenWithTinyUrl($longUrl, $apiKey = '') {
+    $ch = curl_init('https://api.tinyurl.com/create');
+    $payload = json_encode(['url' => $longUrl, 'domain' => 'tinyurl.com']);
+    $headers = ['Content-Type: application/json'];
+    if (!empty($apiKey)) $headers[] = 'Authorization: Bearer ' . $apiKey;
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+    curl_setopt($ch, CURLOPT_USERAGENT, 'Newsroom-Creator/1.7');
+    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    $response = curl_exec($ch);
+    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr  = curl_error($ch);
+    curl_close($ch);
+    if ($response === false || $httpCode === 0) return ['error' => 'Could not reach TinyURL: ' . ($curlErr ?: 'no response')];
+    $result = json_decode($response, true);
+    if ($httpCode === 200 && isset($result['data']['tiny_url'])) {
+        return ['shorturl' => $result['data']['tiny_url']];
+    }
+    $errMsg = $result['errors'][0] ?? ($result['message'] ?? 'HTTP ' . $httpCode);
+    error_log('Newsroom Creator — TinyURL error: ' . $errMsg . ' | URL: ' . $longUrl);
+    return ['error' => 'TinyURL: ' . $errMsg];
+}
+
+function shortenWithShortIo($longUrl, $apiKey) {
+    global $db;
+    if (empty($apiKey)) return ['error' => 'Short.io API key is not configured.'];
+    $domain = getSetting($db, 'shortio_domain') ?: '';
+    if (empty($domain)) return ['error' => 'Short.io domain is not configured. Add it in System settings.'];
+    $ch = curl_init('https://api.short.io/links');
+    $payload = json_encode(['originalURL' => $longUrl, 'domain' => $domain]);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json', 'authorization: ' . $apiKey]);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+    curl_setopt($ch, CURLOPT_USERAGENT, 'Newsroom-Creator/1.7');
+    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    $response = curl_exec($ch);
+    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr  = curl_error($ch);
+    curl_close($ch);
+    if ($response === false || $httpCode === 0) return ['error' => 'Could not reach Short.io: ' . ($curlErr ?: 'no response')];
+    $result = json_decode($response, true);
+    if (($httpCode === 200 || $httpCode === 201) && isset($result['shortURL'])) {
+        return ['shorturl' => $result['shortURL']];
+    }
+    $errMsg = $result['message'] ?? ('HTTP ' . $httpCode);
+    error_log('Newsroom Creator — Short.io error: ' . $errMsg . ' | URL: ' . $longUrl);
+    return ['error' => 'Short.io: ' . $errMsg];
+}
+
+// Legacy alias — used by generate_social which still calls shortenWithIsgd
+function shortenWithIsgd($longUrl) {
+    global $db;
+    return shortenUrl($db, $longUrl);
+}
+
 
 $action = $_GET['action'] ?? '';
 $method = $_SERVER['REQUEST_METHOD'];
@@ -327,6 +363,15 @@ switch ($action) {
             if (!empty($presentKws)) {
                 $keywordInstruction = " 5. Naturally incorporate these keywords which appear in the source: " . implode(', ', $presentKws) . ".";
             }
+        }
+        // headline_only mode: just regenerate a headline for existing article content
+        if (!empty($data['headline_only'])) {
+            $systemPrompt = "You are an expert digital journalist. Generate ONE short, punchy, SEO-optimised news headline in $lang English for the article below. Return ONLY the headline text — no quotes, no label, no explanation.";
+            $result = callAI($db, $systemPrompt, $data['content']);
+            if (isset($result['error'])) { echo json_encode(['success' => false, 'error' => $result['error']]); break; }
+            $headline = trim(str_replace(["HEADLINE: ", "**"], "", $result['content']));
+            echo json_encode(['success' => true, 'headline' => $headline, 'article_content' => '']);
+            break;
         }
         $systemPrompt = "Role: You are an expert digital journalist. Transform the source content into a professional, SEO-optimized news article. Rules: 1. Headline: Short, searchable. 2. Structure: Inverted Pyramid. 3. Active voice, formal third person. $lang English. 4. ONLY USE provided facts.$keywordInstruction Return response as: HEADLINE: [Your Headline]\n\n[Article Body]";
         $result = callAI($db, $systemPrompt, $data['content']);
@@ -659,10 +704,10 @@ switch ($action) {
             break;
         }
 
-        $short_url = shortenWithIsgd($permalink);
+        $short_url = shortenUrl($db, $permalink);
         if (empty($short_url['shorturl'])) {
-            $errMsg = $short_url['error'] ?? 'Unknown error from is.gd.';
-            echo json_encode(['success' => false, 'error' => 'is.gd: ' . $errMsg]);
+            $errMsg = $short_url['error'] ?? 'Unknown error from URL shortener.';
+            echo json_encode(['success' => false, 'error' => $errMsg]);
             break;
         }
 
@@ -723,7 +768,10 @@ switch ($action) {
             'wp_api_key' => getSetting($db, 'wp_api_key'),
             'local_keywords' => getSetting($db, 'local_keywords'),
             'app_name' => getSetting($db, 'app_name'),
-            'app_logo' => getSetting($db, 'app_logo')
+            'app_logo' => getSetting($db, 'app_logo'),
+            'shorturl_provider' => getSetting($db, 'shorturl_provider') ?: 'tinyurl',
+            'shorturl_api_key' => getSetting($db, 'shorturl_api_key'),
+            'shortio_domain' => getSetting($db, 'shortio_domain')
         ];
         echo json_encode($res);
         break;
@@ -731,7 +779,7 @@ switch ($action) {
     Case 'save_settings':
         if ($userRole !== 'admin') { echo json_encode(['success' => false]); exit; }
         $data = json_decode(file_get_contents('php://input'), true);
-        $allowed = ['ai_base_url', 'ai_api_key', 'ai_model', 'language_variant', 'wp_site_url', 'wp_api_key', 'local_keywords'];
+        $allowed = ['ai_base_url', 'ai_api_key', 'ai_model', 'language_variant', 'wp_site_url', 'wp_api_key', 'local_keywords', 'shorturl_provider', 'shorturl_api_key', 'shortio_domain'];
         foreach ($allowed as $key) {
             if (isset($data[$key])) {
                 $stmt = $db->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
