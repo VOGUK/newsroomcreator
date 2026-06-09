@@ -4,6 +4,28 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Newsroom Creator</title>
+
+    <!-- ═══ CRAWLERS / INDEXING ═══ -->
+    <!-- Prevent all search engines, AI crawlers, and web archivers from indexing this app -->
+    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, nocache">
+    <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet">
+    <meta name="bingbot" content="noindex, nofollow">
+    <!-- GPTBot (OpenAI), ClaudeBot (Anthropic), CCBot (Common Crawl used by AI trainers) -->
+    <meta name="GPTBot" content="noindex">
+    <meta name="ClaudeBot" content="noindex">
+    <meta name="CCBot" content="noindex">
+    <meta name="anthropic-ai" content="noindex">
+    <meta name="cohere-ai" content="noindex">
+
+    <!-- ═══ PWA / ADD TO HOME SCREEN ═══ -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb" id="theme-color-meta">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Newsroom">
+    <link rel="apple-touch-icon" href="icon-192.png">
+
     <script src="https://unpkg.com/feather-icons"></script>
     <style>
         :root {
@@ -481,6 +503,26 @@
             </div>
             <div id="footer-branding" style="font-size:0.75rem; color:var(--text-muted); opacity:0.7;">Newsroom Creator by VBI &copy; 2026 All Rights Reserved</div>
         </div>
+    </div>
+
+    <!-- ═══ PWA INSTALL BANNER ═══ -->
+    <div id="pwa-install-banner" style="display:none; position:fixed; bottom:60px; left:0; right:0; margin:0 16px; background:var(--surface-color); border:1px solid var(--border-color); border-radius:10px; padding:14px 16px; z-index:9990; box-shadow:0 4px 18px rgba(0,0,0,0.18); align-items:center; gap:12px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:180px;">
+            <strong style="font-size:0.95rem;">Add to Home Screen</strong>
+            <p style="margin:2px 0 0; font-size:0.82rem; color:var(--text-muted);">Install Newsroom Creator for quick access on the move.</p>
+        </div>
+        <div style="display:flex; gap:8px; flex-shrink:0;">
+            <button id="pwa-install-btn" style="background:var(--primary-color); color:white; padding:8px 16px; border-radius:6px; border:none; cursor:pointer; font-size:0.88rem; display:flex; align-items:center; gap:5px;"><i data-feather="download" style="width:14px;height:14px;"></i> Install</button>
+            <button id="pwa-dismiss-btn" style="background:transparent; color:var(--text-muted); padding:8px 12px; border-radius:6px; border:1px solid var(--border-color); cursor:pointer; font-size:0.88rem;">Later</button>
+        </div>
+    </div>
+    <!-- iOS-specific hint (shown only on iOS where beforeinstallprompt doesn't fire) -->
+    <div id="pwa-ios-banner" style="display:none; position:fixed; bottom:60px; left:0; right:0; margin:0 16px; background:var(--surface-color); border:1px solid var(--border-color); border-radius:10px; padding:14px 16px; z-index:9990; box-shadow:0 4px 18px rgba(0,0,0,0.18); align-items:center; gap:12px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:180px;">
+            <strong style="font-size:0.95rem;">Add to Home Screen</strong>
+            <p style="margin:2px 0 0; font-size:0.82rem; color:var(--text-muted);">Tap the <strong>Share</strong> button <span style="font-size:1rem;">⎙</span> in Safari, then choose <strong>"Add to Home Screen"</strong>.</p>
+        </div>
+        <button id="pwa-ios-dismiss-btn" style="background:transparent; color:var(--text-muted); padding:8px 12px; border-radius:6px; border:1px solid var(--border-color); cursor:pointer; font-size:0.88rem; flex-shrink:0;">Got it</button>
     </div>
 
     <script>
@@ -1185,7 +1227,10 @@
                     }
                 }
 
-                updateKeywordDensity(); updateHumanScore(); updateStats(); feather.replace(); switchView('editor');
+                // Restore similarity panel if this article has source content to compare against
+                spinSourceContent = art.original_content ? art.original_content.trim() : '';
+
+                updateKeywordDensity(); updateHumanScore(); updateStats(); updateSimilarity(); feather.replace(); switchView('editor');
             }
         }
 
@@ -1491,7 +1536,7 @@
 
         // Compute a simple word-overlap similarity ratio between two texts (Jaccard-like)
         function computeSimilarity(textA, textB) {
-            const tokenize = t => new Set((t.toLowerCase().match(/\w{3,}/g) || []));
+            const tokenize = t => new Set((t.toLowerCase().match(/\b\w{3,}\b/g) || []));
             const a = tokenize(textA);
             const b = tokenize(textB);
             if (a.size === 0 || b.size === 0) return 0;
@@ -1504,8 +1549,11 @@
         let spinSourceContent = ''; // stores original source when spinning
 
         function updateSimilarity() {
+            if (!spinSourceContent) return; // nothing to compare against
             const panel = document.getElementById('similarity-panel');
-            if (!panel || panel.classList.contains('hidden')) return;
+            if (!panel) return;
+            // Ensure the panel is visible whenever we have a source to compare
+            panel.classList.remove('hidden');
             const spun = document.getElementById('edit-content').value;
             const score = computeSimilarity(spinSourceContent, spun);
             const bar = document.getElementById('similarity-bar');
@@ -2028,8 +2076,12 @@
             await saveSettingsForm(); 
             const res = await api('test_wp_connection');
             btn.innerHTML = '<i data-feather="zap"></i> Test Connection'; btn.disabled = false; feather.replace();
-            if (res && res.success) { result.style.color = '#10b981'; result.innerText = '✓ Connection successful!'; } 
-            else { result.style.color = 'var(--danger-color)'; result.innerText = '✗ ' + (res?.error || 'Connection failed.'); }
+            if (res && res.success) {
+                result.style.color = '#10b981';
+                result.innerText = '✓ Connection successful!' + (res.warning ? ' ⚠ ' + res.warning : '');
+                // If the server auto-corrected the URL, refresh the displayed value
+                if (res.warning && res.warning.includes('auto-corrected')) loadSettings();
+            } else { result.style.color = 'var(--danger-color)'; result.innerText = '✗ ' + (res?.error || 'Connection failed.'); }
         }
 
         function toggleShortIoDomain() {
@@ -2106,6 +2158,58 @@
                 try { const data = JSON.parse(e.target.result); const res = await api('restore_json', 'POST', data); if(res.success) { showToast("Data restored"); loadDashboard(); } else showToast("Error restoring data.", true); } catch (err) { showToast("Invalid JSON file.", true); }
             };
             reader.readAsText(file);
+        }
+    </script>
+
+    <script>
+        // ═══ PWA: Add to Home Screen ═══
+        let deferredInstallPrompt = null;
+
+        const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+        const isInStandaloneMode = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+        const pwaDismissedUntil = localStorage.getItem('pwaDismissedUntil');
+        const bannerSnoozed = pwaDismissedUntil && Date.now() < parseInt(pwaDismissedUntil, 10);
+
+        // Android / Chrome: capture the native prompt
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredInstallPrompt = e;
+            if (!isInStandaloneMode && !bannerSnoozed) {
+                const banner = document.getElementById('pwa-install-banner');
+                if (banner) { banner.style.display = 'flex'; feather.replace(); }
+            }
+        });
+
+        // iOS Safari: show manual hint if not already installed
+        if (isIos && !isInStandaloneMode && !bannerSnoozed) {
+            setTimeout(() => {
+                const iosBanner = document.getElementById('pwa-ios-banner');
+                if (iosBanner) { iosBanner.style.display = 'flex'; feather.replace(); }
+            }, 3000);
+        }
+
+        document.getElementById('pwa-install-btn')?.addEventListener('click', async () => {
+            if (!deferredInstallPrompt) return;
+            deferredInstallPrompt.prompt();
+            const { outcome } = await deferredInstallPrompt.userChoice;
+            deferredInstallPrompt = null;
+            document.getElementById('pwa-install-banner').style.display = 'none';
+        });
+
+        document.getElementById('pwa-dismiss-btn')?.addEventListener('click', () => {
+            document.getElementById('pwa-install-banner').style.display = 'none';
+            // Snooze for 7 days
+            localStorage.setItem('pwaDismissedUntil', Date.now() + 7 * 24 * 60 * 60 * 1000);
+        });
+
+        document.getElementById('pwa-ios-dismiss-btn')?.addEventListener('click', () => {
+            document.getElementById('pwa-ios-banner').style.display = 'none';
+            localStorage.setItem('pwaDismissedUntil', Date.now() + 7 * 24 * 60 * 60 * 1000);
+        });
+
+        // Register service worker (required for PWA installability on Android)
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(() => {});
         }
     </script>
 </body>
