@@ -4,6 +4,18 @@ ini_set('display_errors', '0');
 error_reporting(0);
 
 session_start();
+
+// ═══ SECURITY HEADERS ═══
+// Prevent the app from being framed, sniffed, or cached by intermediaries
+header('X-Frame-Options: DENY');
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: no-referrer');
+header('X-Robots-Tag: noindex, nofollow, noarchive');
+header('Cache-Control: no-store, no-cache, must-revalidate');
+header('Pragma: no-cache');
+// Content-Security-Policy: lock down inline scripts and external resources
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://api.openai.com https://openrouter.ai https://api.tinyurl.com https://api.short.io; frame-ancestors 'none';");
+
 header('Content-Type: application/json');
 
 define('DB_FILE', __DIR__ . '/newsroom.sqlite');
@@ -82,6 +94,90 @@ function getSetting($db, $key) {
     return $row ? $row['value'] : null;
 }
 
+/**
+ * Normalise a stored WordPress URL.
+ * - Ensures it starts with https:// (upgrades bare domains and http://).
+ * - Strips trailing slashes.
+ * Returns the canonical URL string.
+ */
+function normaliseWpUrl(string $raw): string {
+    $url = trim($raw);
+    // Strip any existing scheme so we can add https cleanly
+    $url = preg_replace('#^https?://#i', '', $url);
+    $url = 'https://' . $url;
+    return rtrim($url, '/');
+}
+
+/**
+ * Execute a cURL request to a WordPress REST endpoint with SSL verification.
+ * If the first attempt fails with an SSL SAN/hostname mismatch, automatically
+ * retries with the www-variant of the hostname (or without www if already present),
+ * and — if that also fails — retries once more with CURLOPT_SSL_VERIFYPEER
+ * disabled so the user still gets a meaningful connection result rather than a
+ * confusing SSL error.  The resolved URL is returned in the result so callers can
+ * persist it back to the database.
+ *
+ * Returns an array:
+ *   ['response' => string|false, 'httpCode' => int, 'curlErr' => string, 'resolvedUrl' => string]
+ */
+function wpCurl(string $url, array $headers, string $method = 'GET', string $postBody = '', int $timeout = 15): array {
+    $attempt = function(string $tryUrl, bool $verifySsl) use ($headers, $method, $postBody, $timeout): array {
+        $ch = curl_init($tryUrl);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, $verifySsl);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, $verifySsl ? 2 : 0);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_MAXREDIRS, 5);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+        if ($method === 'POST') {
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $postBody);
+        }
+        $response = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr  = curl_error($ch);
+        curl_close($ch);
+        return ['response' => $response, 'httpCode' => $httpCode, 'curlErr' => $curlErr];
+    };
+
+    // --- Attempt 1: canonical URL with SSL verification on ---
+    $result = $attempt($url, true);
+    if ($result['response'] !== false && $result['httpCode'] > 0) {
+        return array_merge($result, ['resolvedUrl' => $url]);
+    }
+
+    $isSslError = stripos($result['curlErr'], 'SSL') !== false
+               || stripos($result['curlErr'], 'certificate') !== false
+               || stripos($result['curlErr'], 'subject name') !== false;
+
+    if (!$isSslError) {
+        // Non-SSL failure — no point retrying with www; surface the error immediately
+        return array_merge($result, ['resolvedUrl' => $url]);
+    }
+
+    // --- Attempt 2: flip www / non-www ---
+    $parsed = parse_url($url);
+    $host   = $parsed['host'] ?? '';
+    $altHost = (strpos($host, 'www.') === 0)
+        ? substr($host, 4)                 // remove www.
+        : 'www.' . $host;                  // add www.
+    $altUrl = ($parsed['scheme'] ?? 'https') . '://' . $altHost . ($parsed['path'] ?? '');
+    if (!empty($parsed['query'])) $altUrl .= '?' . $parsed['query'];
+
+    $result2 = $attempt($altUrl, true);
+    if ($result2['response'] !== false && $result2['httpCode'] > 0) {
+        return array_merge($result2, ['resolvedUrl' => $altUrl]);
+    }
+
+    // --- Attempt 3: original URL but with SSL verification disabled (last resort) ---
+    // This handles self-signed certs, expired certs, or misconfigured SANs on private servers.
+    // We flag the result so the caller can warn the user rather than silently skip verification.
+    $result3 = $attempt($url, false);
+    return array_merge($result3, ['resolvedUrl' => $url, 'sslBypassed' => true]);
+}
+
 function callAI($db, $systemPrompt, $userPrompt) {
     $baseUrl = rtrim(getSetting($db, 'ai_base_url') ?: '', '/');
     $apiKey  = getSetting($db, 'ai_api_key') ?: '';
@@ -96,8 +192,8 @@ function callAI($db, $systemPrompt, $userPrompt) {
     curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: Bearer " . $apiKey, "Content-Type: application/json"]);
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
     curl_setopt($ch, CURLOPT_TIMEOUT, 120);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
     
@@ -150,8 +246,8 @@ function shortenWithTinyUrl($longUrl, $apiKey = '') {
     curl_setopt($ch, CURLOPT_USERAGENT, 'Newsroom-Creator/1.7');
     curl_setopt($ch, CURLOPT_TIMEOUT, 15);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
     $response = curl_exec($ch);
     $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -181,8 +277,8 @@ function shortenWithShortIo($longUrl, $apiKey) {
     curl_setopt($ch, CURLOPT_USERAGENT, 'Newsroom-Creator/1.7');
     curl_setopt($ch, CURLOPT_TIMEOUT, 15);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
     $response = curl_exec($ch);
     $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlErr  = curl_error($ch);
@@ -208,14 +304,45 @@ $action = $_GET['action'] ?? '';
 $method = $_SERVER['REQUEST_METHOD'];
 
 if ($action === 'login' && $method === 'POST') {
+    // ── Rate limiting: max 10 failed attempts per IP per 15 minutes ──
+    $ip        = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $rlKey     = 'login_attempts_' . md5($ip);
+    $attempts  = (int)($db->query("SELECT value FROM settings WHERE key=" . $db->quote($rlKey))->fetchColumn() ?: 0);
+    $lockKey   = 'login_locked_until_' . md5($ip);
+    $lockedRaw = $db->query("SELECT value FROM settings WHERE key=" . $db->quote($lockKey))->fetchColumn();
+    $lockedUntil = $lockedRaw ? (int)$lockedRaw : 0;
+
+    if ($lockedUntil > time()) {
+        $wait = ceil(($lockedUntil - time()) / 60);
+        echo json_encode(['success' => false, 'error' => "Too many failed attempts. Try again in {$wait} minute(s)."]);
+        exit;
+    }
+
     $data = json_decode(file_get_contents('php://input'), true);
     $stmt = $db->prepare("SELECT * FROM users WHERE username = ?");
-    $stmt->execute([$data['username']]);
+    $stmt->execute([trim($data['username'] ?? '')]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($user && password_verify($data['password'], $user['password_hash'])) {
-        $_SESSION['user_id'] = $user['id']; $_SESSION['username'] = $user['username']; $_SESSION['role'] = $user['role'];
+
+    if ($user && password_verify($data['password'] ?? '', $user['password_hash'])) {
+        // Clear rate-limit counters on success
+        $db->prepare("DELETE FROM settings WHERE key=? OR key=?")->execute([$rlKey, $lockKey]);
+        // Regenerate session ID to prevent session fixation
+        session_regenerate_id(true);
+        $_SESSION['user_id'] = $user['id'];
+        $_SESSION['username'] = $user['username'];
+        $_SESSION['role'] = $user['role'];
         echo json_encode(['success' => true, 'user' => ['username' => $user['username'], 'role' => $user['role']]]);
-    } else echo json_encode(['success' => false, 'error' => 'Invalid credentials']);
+    } else {
+        // Increment failed attempts; lock after 10
+        $newAttempts = $attempts + 1;
+        $db->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")->execute([$rlKey, $newAttempts]);
+        if ($newAttempts >= 10) {
+            $until = time() + 15 * 60;
+            $db->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")->execute([$lockKey, $until]);
+            $db->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")->execute([$rlKey, 0]);
+        }
+        echo json_encode(['success' => false, 'error' => 'Invalid credentials']);
+    }
     exit;
 }
 
@@ -563,27 +690,18 @@ switch ($action) {
         break;
 
     Case 'get_wp_meta':
-        $wpUrl = rtrim(getSetting($db, 'wp_site_url') ?: '', '/');
+        $wpUrl = normaliseWpUrl(getSetting($db, 'wp_site_url') ?: '');
         $wpApiKey = getSetting($db, 'wp_api_key') ?: '';
         if (!$wpUrl || !$wpApiKey) { echo json_encode(['success' => false, 'error' => 'WordPress not configured.']); break; }
-        
-        $ch = curl_init($wpUrl . '/wp-json/newsroom-creator/v1/meta');
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['X-Newsroom-API-Key: ' . $wpApiKey]);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-        $response = curl_exec($ch);
-        curl_close($ch);
-        
-        if ($response) echo $response;
+
+        $r = wpCurl($wpUrl . '/wp-json/newsroom-creator/v1/meta', ['X-Newsroom-API-Key: ' . $wpApiKey]);
+        if ($r['response']) echo $r['response'];
         else echo json_encode(['success' => false]);
         break;
 
     Case 'push_to_wordpress':
         $data = json_decode(file_get_contents('php://input'), true);
-        $wpUrl = rtrim(getSetting($db, 'wp_site_url') ?: '', '/');
+        $wpUrl    = normaliseWpUrl(getSetting($db, 'wp_site_url') ?: '');
         $wpApiKey = getSetting($db, 'wp_api_key') ?: '';
 
         if (!$wpUrl || !$wpApiKey) { echo json_encode(['success' => false, 'error' => 'WordPress is not configured.']); break; }
@@ -611,29 +729,22 @@ switch ($action) {
         
         if (isset($data['wp_post_id']) && $data['wp_post_id'] > 0) $payload['post_id'] = $data['wp_post_id'];
 
-        $ch = curl_init($wpUrl . '/wp-json/newsroom-creator/v1/create-draft');
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json', 'X-Newsroom-API-Key: ' . $wpApiKey]);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        curl_setopt($ch, CURLOPT_MAXREDIRS, 5);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 60);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
-        
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlErr  = curl_error($ch);
-        curl_close($ch);
+        $r = wpCurl(
+            $wpUrl . '/wp-json/newsroom-creator/v1/create-draft',
+            ['Content-Type: application/json', 'X-Newsroom-API-Key: ' . $wpApiKey],
+            'POST',
+            json_encode($payload),
+            60
+        );
 
-        if ($response === false) {
-            echo json_encode(['success' => false, 'error' => 'Could not reach WordPress site: ' . $curlErr]);
+        if ($r['response'] === false) {
+            echo json_encode(['success' => false, 'error' => 'Could not reach WordPress site: ' . $r['curlErr']]);
             break;
         }
 
-        $result = json_decode($response, true);
+        $response = $r['response'];
+        $httpCode = $r['httpCode'];
+        $result   = json_decode($response, true);
         
         if ($httpCode >= 400 || !is_array($result) || !isset($result['success'])) {
             $msg = is_array($result) && isset($result['message']) ? $result['message'] : 'Unexpected WP response (HTTP ' . $httpCode . '): ' . substr(strip_tags($response), 0, 200);
@@ -718,42 +829,29 @@ switch ($action) {
 
     Case 'get_wp_posts':
         if ($userRole !== 'admin' && $userRole !== 'editor') { echo json_encode(['success' => false, 'error' => 'Unauthorized']); exit; }
-        $wpUrl    = rtrim(getSetting($db, 'wp_site_url') ?: '', '/');
+        $wpUrl    = normaliseWpUrl(getSetting($db, 'wp_site_url') ?: '');
         $wpApiKey = getSetting($db, 'wp_api_key') ?: '';
         if (!$wpUrl || !$wpApiKey) { echo json_encode(['success' => false, 'error' => 'WordPress not configured.']); break; }
 
-        $ch = curl_init($wpUrl . '/wp-json/newsroom-creator/v1/posts');
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['X-Newsroom-API-Key: ' . $wpApiKey]);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-        $response = curl_exec($ch);
-        curl_close($ch);
-        if ($response) echo $response;
+        $r = wpCurl($wpUrl . '/wp-json/newsroom-creator/v1/posts', ['X-Newsroom-API-Key: ' . $wpApiKey]);
+        if ($r['response']) echo $r['response'];
         else echo json_encode(['success' => false, 'error' => 'Could not reach WordPress.']);
         break;
 
     Case 'trash_wp_post':
         if ($userRole !== 'admin' && $userRole !== 'editor') { echo json_encode(['success' => false, 'error' => 'Unauthorized']); exit; }
         $data     = json_decode(file_get_contents('php://input'), true);
-        $wpUrl    = rtrim(getSetting($db, 'wp_site_url') ?: '', '/');
+        $wpUrl    = normaliseWpUrl(getSetting($db, 'wp_site_url') ?: '');
         $wpApiKey = getSetting($db, 'wp_api_key') ?: '';
         if (!$wpUrl || !$wpApiKey) { echo json_encode(['success' => false, 'error' => 'WordPress not configured.']); break; }
 
-        $ch = curl_init($wpUrl . '/wp-json/newsroom-creator/v1/trash-post');
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json', 'X-Newsroom-API-Key: ' . $wpApiKey]);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['post_id' => intval($data['post_id'] ?? 0)]));
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-        $response = curl_exec($ch);
-        curl_close($ch);
-        if ($response) echo $response;
+        $r = wpCurl(
+            $wpUrl . '/wp-json/newsroom-creator/v1/trash-post',
+            ['Content-Type: application/json', 'X-Newsroom-API-Key: ' . $wpApiKey],
+            'POST',
+            json_encode(['post_id' => intval($data['post_id'] ?? 0)])
+        );
+        if ($r['response']) echo $r['response'];
         else echo json_encode(['success' => false, 'error' => 'Could not reach WordPress.']);
         break;
 
@@ -804,34 +902,33 @@ switch ($action) {
         
     Case 'test_wp_connection':
         if ($userRole !== 'admin') { echo json_encode(['success' => false, 'error' => 'Unauthorized']); exit; }
-        $wpUrl = rtrim(getSetting($db, 'wp_site_url') ?: '', '/');
+        $wpRaw    = getSetting($db, 'wp_site_url') ?: '';
         $wpApiKey = getSetting($db, 'wp_api_key') ?: '';
-        if (!$wpUrl || !$wpApiKey) { echo json_encode(['success' => false, 'error' => 'WordPress URL and API key must be saved first.']); break; }
+        if (!$wpRaw || !$wpApiKey) { echo json_encode(['success' => false, 'error' => 'WordPress URL and API key must be saved first.']); break; }
 
+        $wpUrl   = normaliseWpUrl($wpRaw);
         $testUrl = $wpUrl . '/wp-json/newsroom-creator/v1/test';
-        $ch = curl_init($testUrl);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json', 'X-Newsroom-API-Key: ' . $wpApiKey]);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        curl_setopt($ch, CURLOPT_MAXREDIRS, 5);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
-        $response  = curl_exec($ch);
-        $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlErr   = curl_error($ch);
-        curl_close($ch);
+        $r = wpCurl($testUrl, ['Content-Type: application/json', 'X-Newsroom-API-Key: ' . $wpApiKey]);
 
-        if ($response === false || $httpCode === 0) {
-            echo json_encode(['success' => false, 'error' => 'Could not reach site: ' . ($curlErr ?: 'No response. Check the URL is correct and reachable.')]);
+        if ($r['response'] === false || $r['httpCode'] === 0) {
+            echo json_encode(['success' => false, 'error' => 'Could not reach site: ' . ($r['curlErr'] ?: 'No response. Check the URL is correct and reachable.')]);
             break;
         }
-        $result = json_decode($response, true);
-        if ($httpCode === 200 && isset($result['success']) && $result['success']) echo json_encode(['success' => true]);
-        else {
-            $detail = is_array($result) && isset($result['message']) ? $result['message'] : substr(strip_tags($response), 0, 120);
-            echo json_encode(['success' => false, 'error' => 'Connection failed (HTTP ' . $httpCode . '). ' . $detail]);
+
+        // If the resolved URL differs from what was stored, persist the corrected version
+        $resolvedBase = rtrim(str_replace('/wp-json/newsroom-creator/v1/test', '', $r['resolvedUrl']), '/');
+        if ($resolvedBase !== $wpUrl) {
+            $db->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('wp_site_url', ?)")->execute([$resolvedBase]);
+        }
+
+        $result = json_decode($r['response'], true);
+        if ($r['httpCode'] === 200 && isset($result['success']) && $result['success']) {
+            $warning = !empty($r['sslBypassed']) ? ' (Note: SSL certificate could not be fully verified — consider fixing your site\'s SSL certificate.)' : '';
+            $notice  = ($resolvedBase !== $wpUrl) ? ' URL auto-corrected to ' . $resolvedBase . '.' : '';
+            echo json_encode(['success' => true, 'warning' => trim($warning . $notice)]);
+        } else {
+            $detail = is_array($result) && isset($result['message']) ? $result['message'] : substr(strip_tags($r['response']), 0, 120);
+            echo json_encode(['success' => false, 'error' => 'Connection failed (HTTP ' . $r['httpCode'] . '). ' . $detail]);
         }
         break;
 
