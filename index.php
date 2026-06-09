@@ -109,6 +109,7 @@
                 <div class="nav-links">
                     <button onclick="switchView('dashboard')"><i data-feather="home"></i> <span>Dashboard</span></button>
                     <button onclick="switchView('list')"><i data-feather="list"></i> <span>Articles</span></button>
+                    <button onclick="switchView('posts')" class="editor-visible"><i data-feather="globe"></i> <span>Posts</span></button>
                     <button onclick="switchView('recycle')"><i data-feather="trash-2"></i> <span>Bin</span></button>
                     <button onclick="switchView('system')"><i data-feather="settings"></i> <span>System</span></button>
                     <div style="width:1px; height:20px; background:var(--border-color); margin: 0 10px;"></div>
@@ -151,8 +152,24 @@
                         <div id="editor-wp-badge" class="hidden" style="color:white; padding:8px 12px; border-radius:6px; font-size:0.85rem; font-weight:bold; margin-bottom:15px; text-align:center;"></div>
                         
                         <h3>Generated Article</h3>
-                        <input type="text" id="edit-headline" placeholder="Headline...">
-                        <textarea id="edit-content" oninput="updateKeywordDensity(); updateHumanScore(); updateStats();" style="margin-bottom: 5px;"></textarea>
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:15px;">
+                            <input type="text" id="edit-headline" placeholder="Headline..." style="margin-bottom:0; flex:1;">
+                            <button onclick="regenerateHeadline()" id="btn-regen-headline" title="Re-generate headline" style="background-color:#8b5cf6; flex-shrink:0; white-space:nowrap;"><i data-feather="refresh-cw"></i> New Headline</button>
+                        </div>
+                        <div id="similarity-panel" class="hidden" style="margin-bottom:10px; padding:10px; background:var(--bg-color); border:1px solid var(--border-color); border-radius:6px; font-size:0.85rem;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                <strong>Similarity to Original Source</strong>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <button onclick="recheckSimilarity()" id="btn-recheck-similarity" title="Re-check similarity against current edited article" style="background:#6366f1; font-size:0.78rem; padding:4px 10px; white-space:nowrap;"><i data-feather="refresh-cw" style="width:12px;height:12px;"></i> Recheck</button>
+                                    <span id="similarity-score-badge" style="padding:3px 10px; border-radius:12px; font-size:0.8rem; font-weight:700; color:white; background:#6b7280;">—</span>
+                                </div>
+                            </div>
+                            <div style="background:var(--border-color); border-radius:4px; height:6px;">
+                                <div id="similarity-bar" style="background:#6b7280; width:0%; height:100%; border-radius:4px; transition:width 0.4s;"></div>
+                            </div>
+                            <p style="font-size:0.78rem; color:var(--text-muted); margin:6px 0 0 0;">Lower similarity means more unique content. Aim for under 40% for copyright safety.</p>
+                        </div>
+                        <textarea id="edit-content" oninput="updateKeywordDensity(); updateHumanScore(); updateStats(); updateSimilarity();" style="margin-bottom: 5px;"></textarea>
                         
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                             <div id="article-stats" class="text-muted" style="font-size:0.85rem;">0 words | 0 chars | ~0 min read (out loud)</div>
@@ -173,7 +190,7 @@
 
                         <!-- 1. FEATURED IMAGE SECTION -->
                         <div style="margin-top:15px; border-top: 1px solid var(--border-color); padding-top:15px;">
-                            <h4 style="margin: 0 0 5px 0; font-size:0.9rem;">Attach Featured Image</h4>
+                            <h4 style="margin: 0 0 5px 0; font-size:0.9rem;">Attach Featured Image <span style="color:var(--danger-color);">*</span> <small style="color:var(--text-muted); font-weight:normal;">(Required — min 1200×675 px)</small></h4>
                             <input type="file" id="edit-image-file" accept="image/*" onchange="processImage(this)" style="margin-bottom: 5px;">
                             <input type="hidden" id="edit-image-base64">
                             <img id="image-preview" class="hidden" style="max-width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border-color); margin-top: 5px;">
@@ -238,7 +255,7 @@
                                 <!-- State B: permalink exists but no shortlink yet -->
                                 <div id="shortlink-create" class="hidden" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                                     <button id="btn-create-shortlink" onclick="createShortlink()" style="background:#6366f1; font-size:0.82rem; padding:5px 12px;">
-                                        <i data-feather="link"></i> Create Short URL (is.gd)
+                                        <i data-feather="link"></i> Create Short URL (TinyURL)
                                     </button>
                                     <span id="shortlink-create-msg" style="font-size:0.8rem; color:var(--text-muted);"></span>
                                 </div>
@@ -297,7 +314,10 @@
                     <div id="all-articles-list"></div>
                 </div>
 
-                <div class="card editor-visible" id="wp-posts-card">
+            </div>
+
+            <div id="posts" class="view hidden">
+                <div class="card">
                     <div class="card-header">
                         <h2>WordPress Posts</h2>
                         <button onclick="loadWpPosts()" class="secondary" id="btn-reload-wp-posts"><i data-feather="refresh-cw"></i> Refresh</button>
@@ -391,6 +411,26 @@
                 </div>
 
                 <div class="card admin-only">
+                    <h2>URL Shortener (Admin)</h2>
+                    <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:15px;">Choose which URL shortening service to use. TinyURL works without an API key; Short.io requires a key and your custom domain.</p>
+                    <label style="font-size:0.85rem; font-weight:600;">Provider</label>
+                    <select id="shorturl-provider" onchange="toggleShortIoDomain()" style="margin-bottom:15px;">
+                        <option value="tinyurl">TinyURL</option>
+                        <option value="shortio">Short.io</option>
+                    </select>
+                    <label style="font-size:0.85rem; font-weight:600;">API Key <span style="font-weight:normal; color:var(--text-muted);">(Optional for TinyURL / Required for Short.io)</span></label>
+                    <div style="position:relative;">
+                        <input type="password" id="shorturl-api-key" placeholder="Enter API key" style="padding-right:44px; margin-bottom:15px;">
+                        <button onclick="toggleShortUrlKeyVisibility()" class="icon-btn" id="btn-toggle-shorturl-key" title="Show/hide key" style="position:absolute; right:8px; top:12px; margin:0;"><i data-feather="eye"></i></button>
+                    </div>
+                    <div id="shortio-domain-wrap" class="hidden">
+                        <label style="font-size:0.85rem; font-weight:600;">Short.io Domain</label>
+                        <input type="text" id="shortio-domain" placeholder="e.g. yourdomain.short.gy" style="margin-bottom:15px;">
+                    </div>
+                    <button onclick="saveSettingsForm()"><i data-feather="save"></i> Save URL Shortener Settings</button>
+                </div>
+
+                <div class="card admin-only">
                     <h2>Customisation (Admin)</h2>
                     <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:15px;">Change the app name and logo shown on the login screen and header. Logo must be a PNG, minimum 512×512 pixels.</p>
                     <label style="font-size:0.85rem; font-weight:600;">App Name</label>
@@ -439,7 +479,7 @@
                 <i data-feather="user" style="width:13px;height:13px;"></i>
                 <span id="login-status-text"></span>
             </div>
-            <div id="footer-branding" style="font-size:0.75rem; color:var(--text-muted); opacity:0.7;">Newsroom Creator by VOGUK</div>
+            <div id="footer-branding" style="font-size:0.75rem; color:var(--text-muted); opacity:0.7;">Newsroom Creator by VBI &copy; 2026 All Rights Reserved</div>
         </div>
     </div>
 
@@ -593,7 +633,8 @@
             document.querySelectorAll('.view').forEach(el => el.classList.add('hidden'));
             document.getElementById(view).classList.remove('hidden');
             if(view === 'dashboard') loadDashboard();
-            if(view === 'list') { loadArticles(); loadWpPosts(); }
+            if(view === 'list') { loadArticles(); }
+            if(view === 'posts') { loadWpPosts(); }
             if(view === 'recycle') loadRecycleBin();
             if(view === 'system') { 
                 loadSettings(); 
@@ -635,12 +676,27 @@
                     document.getElementById('sys-logo-preview-wrap').style.alignItems = 'center';
                 }
                 applyBranding(res.app_name, res.app_logo);
+                // URL shortener
+                if (document.getElementById('shorturl-provider')) {
+                    document.getElementById('shorturl-provider').value = res.shorturl_provider || 'tinyurl';
+                    document.getElementById('shorturl-api-key').value  = res.shorturl_api_key || '';
+                    document.getElementById('shortio-domain').value     = res.shortio_domain || '';
+                    toggleShortIoDomain();
+                    // Update dynamic button label
+                    updateShortUrlButtonLabel(res.shorturl_provider || 'tinyurl');
+                }
             }
         }
 
         async function loadDashboard() {
-            const res = await api('get_articles&limit=10');
-            renderList(res.articles || [], 'recent-articles-list', true);
+            // Fetch all articles, then show last 10 + any flagged (further_action or in_progress)
+            const res = await api('get_articles');
+            const all = res.articles || [];
+            const flaggedIds = new Set();
+            all.filter(a => a.article_status === 'further_action' || a.article_status === 'in_progress').forEach(a => flaggedIds.add(a.id));
+            all.slice(0, 10).forEach(a => flaggedIds.add(a.id));
+            const merged = all.filter(a => flaggedIds.has(a.id));
+            renderList(merged, 'recent-articles-list', true);
         }
 
         async function loadArticles() {
@@ -650,6 +706,14 @@
                 allArticlesData.sort((a,b) => (a.headline||'').localeCompare(b.headline||''));
             }
             renderList(allArticlesData, 'all-articles-list', false);
+        }
+
+        function isOlderThan31Days(dateStr) {
+            if (!dateStr) return false;
+            try {
+                const d = new Date(dateStr.replace(/-/g, '/'));
+                return (Date.now() - d.getTime()) > 31 * 24 * 60 * 60 * 1000;
+            } catch(e) { return false; }
         }
 
         function renderList(articles, containerId, isDashboard = false) {
@@ -693,24 +757,37 @@
                 // Push labels — hidden from Users
                 let pushHtml = '';
                 if (!isUser) {
-                    let dateStr = isDashboard ? '' : ` ${formatDateTimeStr(art.wp_pushed_at)}`;
-                    let pCount = art.push_count || 0;
-                    if (pCount === 0 && art.wp_pushed_at) pCount = 1;
+                    const wpSt = art.wp_status || '';
+                    const pCount = Math.max(parseInt(art.push_count, 10) || 0, art.wp_pushed_at ? 1 : 0);
+                    const dateStr = isDashboard ? '' : ` ${formatDateTimeStr(art.wp_pushed_at)}`;
 
-                    if (pCount > 1) {
-                        pushHtml = `<span style="background:#3a88fe; color:white; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:600;">Re-pushed${dateStr}</span>`;
-                    } else if (pCount === 1) {
-                        pushHtml = `<span style="background:#10b981; color:white; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:600;">Pushed${dateStr}</span>`;
+                    if (pCount > 0) {
+                        // Determine the WP publish state badge
+                        let wpStateLabel = '', wpStateColor = '';
+                        if (wpSt === 'publish') {
+                            wpStateLabel = '🟢 Published'; wpStateColor = '#16a34a';
+                        } else if (wpSt === 'future') {
+                            wpStateLabel = '🔵 Scheduled'; wpStateColor = '#2563eb';
+                        } else {
+                            wpStateLabel = '⚪ Draft'; wpStateColor = '#6b7280';
+                        }
+                        const pushLabel = pCount > 1 ? 'Re-pushed' : 'Pushed';
+                        const pushColor = pCount > 1 ? '#3a88fe' : '#10b981';
+                        pushHtml = `<span style="background:${pushColor}; color:white; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:600;">${pushLabel}${dateStr}</span>` +
+                                   `<span style="background:${wpStateColor}; color:white; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:600; margin-left:4px;">${wpStateLabel}</span>`;
                     } else {
                         pushHtml = `<span style="background:#b37601; color:white; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:600;">Not Pushed</span>`;
                     }
                 }
 
+                const isStale = !isDashboard && isOlderThan31Days(art.updated_at);
+                const staleNotice = isStale ? `<br><small style="color:#2563eb;"><i>⟳ Article is 31+ days old — see Posts page for the live version.</i></small>` : '';
                 container.innerHTML += `
                     <div class="list-item">
                         <div>
                             <strong>${art.headline || 'Untitled'}</strong> 
                             <br><small>Updated: ${art.updated_at}</small>
+                            ${staleNotice}
                         </div>
                         <div class="list-item-actions">
                             ${statusHtml}
@@ -850,6 +927,7 @@
         }
 
         async function submitArticle(isResubmit = false) {
+            if (!validateImageRequired()) return;
             const saved = await saveArticle(true);
             if (!saved) return;
 
@@ -944,6 +1022,9 @@
             if (submitBtn) { submitBtn.dataset.resubmit = '0'; submitBtn.style.background = '#f59e0b'; submitBtn.innerHTML = '<i data-feather="send"></i> Submit Article'; submitBtn.disabled = false; }
             document.getElementById('spellcheck-results').classList.add('hidden');
             document.getElementById('spellcheck-results').innerHTML = '';
+            const simPanelNew = document.getElementById('similarity-panel');
+            if (simPanelNew) simPanelNew.classList.add('hidden');
+            spinSourceContent = '';
 
             await loadWpMeta(); updateKeywordDensity(); updateHumanScore(); updateStats(); feather.replace(); switchView('editor');
         }
@@ -1006,7 +1087,7 @@
                 const artStatus = art.article_status || 'draft';
                 
                 if (artStatus === 'approved') {
-                    let pCount = art.push_count || 0;
+                    let pCount = parseInt(art.push_count, 10) || 0;
                     if (pCount === 0 && art.wp_pushed_at) pCount = 1;
                     let pText = pCount > 1 ? 'Re-pushed' : 'Pushed';
                     wpBadge.innerText = `${pText} on ${formatDateTimeStr(art.wp_pushed_at)}`;
@@ -1117,6 +1198,15 @@
                 }
             }
             return true;
+        }
+
+        // Enforces that an image IS attached (used before Submit/Push)
+        function validateImageRequired() {
+            if (!document.getElementById('edit-image-base64').value) {
+                showToast('A featured image (min 1200×675 px) must be attached before submitting or pushing.', true);
+                return false;
+            }
+            return validateImageFields();
         }
 
         async function saveArticle(silent = false) {
@@ -1355,6 +1445,29 @@
                 ${signalHtml}`;
         }
 
+        async function regenerateHeadline() {
+            const articleContent = document.getElementById('edit-content').value;
+            const originalContent = document.getElementById('edit-original').value;
+            const source = articleContent || originalContent;
+            if (!source) return showToast('Generate an article first, then re-generate the headline.', true);
+
+            const btn = document.getElementById('btn-regen-headline');
+            btn.innerHTML = 'Generating...'; btn.disabled = true;
+
+            const lang = (appSettings && appSettings.language_variant) || 'British';
+            const systemPrompt = `You are an expert digital journalist. Generate ONE short, punchy, SEO-optimised news headline in ${lang} English for the article below. Return ONLY the headline text — no quotes, no label, no explanation.`;
+            const res = await api('generate_article', 'POST', { content: source, headline_only: true, _sys: systemPrompt });
+
+            btn.innerHTML = '<i data-feather="refresh-cw"></i> New Headline'; btn.disabled = false; feather.replace();
+
+            if (res && res.success && res.headline) {
+                document.getElementById('edit-headline').value = res.headline;
+                showToast('Headline regenerated!');
+            } else {
+                showToast('Failed to regenerate headline: ' + (res?.error || 'Unknown error'), true);
+            }
+        }
+
         async function generateArticle() {
             const content = document.getElementById('edit-original').value;
             if(!content) return showToast("Please paste original content first.", true);
@@ -1368,8 +1481,58 @@
             if(res && res.success) {
                 document.getElementById('edit-headline').value = res.headline || '';
                 document.getElementById('edit-content').value = res.article_content || '';
+                // Hide similarity panel — not applicable for a fresh generate
+                const simPanel = document.getElementById('similarity-panel');
+                if (simPanel) simPanel.classList.add('hidden');
+                spinSourceContent = '';
                 updateKeywordDensity(); updateHumanScore(); updateStats(); showToast('Article generated successfully!');
             } else showToast("Failed to generate: " + (res.error || "Error"), true);
+        }
+
+        // Compute a simple word-overlap similarity ratio between two texts (Jaccard-like)
+        function computeSimilarity(textA, textB) {
+            const tokenize = t => new Set((t.toLowerCase().match(/\w{3,}/g) || []));
+            const a = tokenize(textA);
+            const b = tokenize(textB);
+            if (a.size === 0 || b.size === 0) return 0;
+            let intersection = 0;
+            a.forEach(w => { if (b.has(w)) intersection++; });
+            const union = new Set([...a, ...b]).size;
+            return Math.round((intersection / union) * 100);
+        }
+
+        let spinSourceContent = ''; // stores original source when spinning
+
+        function updateSimilarity() {
+            const panel = document.getElementById('similarity-panel');
+            if (!panel || panel.classList.contains('hidden')) return;
+            const spun = document.getElementById('edit-content').value;
+            const score = computeSimilarity(spinSourceContent, spun);
+            const bar = document.getElementById('similarity-bar');
+            const badge = document.getElementById('similarity-score-badge');
+            let color = '#16a34a'; // green = low similarity (good)
+            if (score > 70) color = '#dc2626';
+            else if (score > 40) color = '#d97706';
+            bar.style.width = score + '%';
+            bar.style.background = color;
+            badge.style.background = color;
+            badge.innerText = score + '%';
+        }
+
+        function recheckSimilarity() {
+            // Use the original source pasted in the Source Content box as the baseline,
+            // falling back to the stored spinSourceContent if the box has been cleared.
+            const sourceBox = document.getElementById('edit-original').value.trim();
+            if (sourceBox) spinSourceContent = sourceBox;
+            if (!spinSourceContent) {
+                showToast('No original source content available to compare against.', true);
+                return;
+            }
+            const panel = document.getElementById('similarity-panel');
+            if (panel) panel.classList.remove('hidden');
+            updateSimilarity();
+            showToast('Similarity rechecked!');
+            feather.replace();
         }
 
         async function spinArticle() {
@@ -1383,9 +1546,14 @@
             btn.innerHTML = '<i data-feather="refresh-cw"></i> Spin Article'; btn.disabled = false; feather.replace();
             
             if(res && res.success) {
+                spinSourceContent = content; // save original for similarity tracking
                 document.getElementById('edit-headline').value = res.headline || '';
                 document.getElementById('edit-content').value = res.article_content || '';
-                updateKeywordDensity(); updateHumanScore(); updateStats(); showToast('Spun article generated successfully!');
+                updateKeywordDensity(); updateHumanScore(); updateStats();
+                // Show similarity panel
+                const simPanel = document.getElementById('similarity-panel');
+                if (simPanel) { simPanel.classList.remove('hidden'); updateSimilarity(); }
+                showToast('Spun article generated successfully!');
             } else showToast("Failed to spin article: " + (res.error || "Unknown error"), true);
         }
 
@@ -1396,14 +1564,21 @@
                 reader.onload = function(e) {
                     const img = new Image();
                     img.onload = function() {
+                        const MIN_W = 1200, MIN_H = 675;
+                        if (img.width < MIN_W || img.height < MIN_H) {
+                            showToast(`Image too small (${img.width}×${img.height}). Minimum required: ${MIN_W}×${MIN_H} pixels.`, true);
+                            input.value = '';
+                            return;
+                        }
                         const canvas = document.createElement('canvas');
-                        const MAX_WIDTH = 1200; 
+                        // Preserve aspect ratio; cap width at 1920 for file size
+                        const MAX_WIDTH = 1920;
                         let width = img.width; let height = img.height;
                         if (width > MAX_WIDTH) { height = Math.round((height * MAX_WIDTH) / width); width = MAX_WIDTH; }
                         canvas.width = width; canvas.height = height;
                         const ctx = canvas.getContext('2d');
                         ctx.drawImage(img, 0, 0, width, height);
-                        const dataUrl = canvas.toDataURL('image/jpeg', 0.8); 
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
                         
                         document.getElementById('image-preview').src = dataUrl;
                         document.getElementById('image-preview').classList.remove('hidden');
@@ -1535,7 +1710,7 @@
         }
 
         async function prePushCheck() {
-            if (!validateImageFields()) return;
+            if (!validateImageRequired()) return;
             
             const saved = await saveArticle(true);
             if (!saved) return; 
@@ -1555,12 +1730,17 @@
             const catSelect = document.getElementById('wp-category');
             const selectedCats = JSON.stringify(Array.from(catSelect.selectedOptions).map(opt => parseInt(opt.value)));
 
+            // Append site suffix to image title for WordPress
+            const rawImgTitle = document.getElementById('img-title').value.trim();
+            const wpImgTitle = rawImgTitle && !rawImgTitle.endsWith('| Hillingdon Today')
+                ? rawImgTitle + ' | Hillingdon Today'
+                : rawImgTitle;
             const payload = { 
                 id: currentArticleId, 
                 headline: document.getElementById('edit-headline').value,
                 article_content: document.getElementById('edit-content').value,
                 featured_image: document.getElementById('edit-image-base64').value,
-                img_title: document.getElementById('img-title').value,
+                img_title: wpImgTitle,
                 img_alt: document.getElementById('img-alt').value,
                 img_caption: document.getElementById('img-caption').value,
                 wp_post_id: currentWpPostId,
@@ -1659,20 +1839,28 @@
         }
 
         async function createShortlink() {
-            const btn = document.getElementById('btn-create-shortlink');
             const msgEl = document.getElementById('shortlink-create-msg');
-            btn.innerHTML = '<i data-feather="loader"></i> Creating...'; btn.disabled = true; feather.replace();
+            const btnEl = document.getElementById('btn-create-shortlink');
+            btnEl.innerHTML = '<i data-feather="loader"></i> Creating...'; btnEl.disabled = true; feather.replace();
             if (msgEl) msgEl.innerText = '';
 
             const res = await api('create_shortlink', 'POST', { article_id: currentArticleId });
 
-            btn.innerHTML = '<i data-feather="link"></i> Create Short URL (is.gd)'; btn.disabled = false; feather.replace();
+            // Re-fetch after feather.replace() to guard against stale reference
+            const btnRefreshed = document.getElementById('btn-create-shortlink');
+            if (btnRefreshed) { updateShortUrlButtonLabel((appSettings && appSettings.shorturl_provider) || 'tinyurl'); btnRefreshed.disabled = false; }
+            feather.replace();
 
             if (res && res.success) {
                 currentShortUrl = res.short_url;
                 setShortlinkUI(currentShortUrl);
                 showToast('Short URL created!');
             } else {
+                // Explicitly keep the create row visible so the user can retry
+                const createDiv = document.getElementById('shortlink-create');
+                if (createDiv) { createDiv.classList.remove('hidden'); createDiv.style.display = 'flex'; }
+                const btnRetry = document.getElementById('btn-create-shortlink');
+                if (btnRetry) { btnRetry.disabled = false; }
                 if (msgEl) { msgEl.style.color = 'var(--danger-color)'; msgEl.innerText = res?.error || 'Failed to create short URL.'; }
                 showToast(res?.error || 'Failed to create short URL.', true);
             }
@@ -1780,7 +1968,7 @@
             document.getElementById('nav-app-name').innerText = displayName;
             // Login
             document.getElementById('login-app-name').innerText = displayName;
-            // Footer branding stays as "Newsroom Creator by VOGUK" (product identity)
+            // Footer branding is static product identity
 
             const navLogoImg = document.getElementById('nav-logo-img');
             const navLogoIcon = document.getElementById('nav-logo-icon');
@@ -1806,6 +1994,7 @@
 
         // --- System Settings ---
         async function saveSettingsForm() {
+            const shortProvider = document.getElementById('shorturl-provider') ? document.getElementById('shorturl-provider').value : 'tinyurl';
             const data = {
                 local_keywords: document.getElementById('sys-keywords').value,
                 ai_base_url: document.getElementById('ai-base-url').value.trim(),
@@ -1813,7 +2002,10 @@
                 ai_model:    document.getElementById('ai-model').value.trim(),
                 language_variant: document.getElementById('language-variant').value,
                 wp_site_url: document.getElementById('wp-site-url').value.trim(),
-                wp_api_key:  document.getElementById('wp-api-key').value.trim()
+                wp_api_key:  document.getElementById('wp-api-key').value.trim(),
+                shorturl_provider: shortProvider,
+                shorturl_api_key: document.getElementById('shorturl-api-key') ? document.getElementById('shorturl-api-key').value.trim() : '',
+                shortio_domain: document.getElementById('shortio-domain') ? document.getElementById('shortio-domain').value.trim() : ''
             };
             const res = await api('save_settings', 'POST', data);
             if (res && res.success) { showToast('Settings saved successfully!'); loadSettings(); } 
@@ -1838,6 +2030,29 @@
             btn.innerHTML = '<i data-feather="zap"></i> Test Connection'; btn.disabled = false; feather.replace();
             if (res && res.success) { result.style.color = '#10b981'; result.innerText = '✓ Connection successful!'; } 
             else { result.style.color = 'var(--danger-color)'; result.innerText = '✗ ' + (res?.error || 'Connection failed.'); }
+        }
+
+        function toggleShortIoDomain() {
+            const provider = document.getElementById('shorturl-provider');
+            const wrap = document.getElementById('shortio-domain-wrap');
+            if (!provider || !wrap) return;
+            if (provider.value === 'shortio') wrap.classList.remove('hidden');
+            else wrap.classList.add('hidden');
+            updateShortUrlButtonLabel(provider.value);
+        }
+
+        function toggleShortUrlKeyVisibility() {
+            const input = document.getElementById('shorturl-api-key'); const btn = document.getElementById('btn-toggle-shorturl-key');
+            if (input.type === 'password') { input.type = 'text'; btn.innerHTML = '<i data-feather="eye-off"></i>'; }
+            else { input.type = 'password'; btn.innerHTML = '<i data-feather="eye"></i>'; } feather.replace();
+        }
+
+        function updateShortUrlButtonLabel(provider) {
+            const btn = document.getElementById('btn-create-shortlink');
+            if (!btn) return;
+            const label = provider === 'shortio' ? 'Short.io' : 'TinyURL';
+            btn.innerHTML = `<i data-feather="link"></i> Create Short URL (${label})`;
+            feather.replace();
         }
 
         function toggleApiKeyVisibility() {
