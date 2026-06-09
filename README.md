@@ -58,6 +58,6 @@ This application is designed for rapid deployment on standard PHP-based shared h
 * **Backup**: Regularly use the "Backup JSON" feature to maintain local copies of your articles.
 * **API Security**: Your API keys are stored in the local SQLite database and are not accessible via the frontend code.
 
-**Copyright (c) 2026 VBI.**
+**Copyright © 2026 VBI.**
 *See the LICENSE full terms.
 Modification is strictly prohibited without a Commercial Modification License.*
